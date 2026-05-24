@@ -21,7 +21,7 @@ import ptTranslations from '@/locales/pt/common.json'
 const PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 'TON/USDT', 'SUI/USDT']
 const ALL_PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 'TON/USDT', 'SUI/USDT', 'BNB/USDT', 'DOT/USDT', 'MATIC/USDT', 'ATOM/USDT', 'LTC/USDT', 'NEAR/USDT', 'UNI/USDT', 'APT/USDT', 'ARB/USDT', 'OP/USDT']
 const TIMEFRAMES = ['1m', '5m', '15m', '1H', '4H', '1D']
-const NEWSDATA_API_KEY = 'pub_a8a6b45669e248b7802c5894974d98b1'
+
 
 // ── Translations ─────────────────────────────────────────────────────────────
 function useT() {
@@ -602,15 +602,12 @@ export default function Home() {
     return () => wsRef.current?.close()
   }, [])
 
-  // Load news from newsdata.io
+  // Load news via backend (proxy para newsdata.io)
   const loadNews = async () => {
     setNewsLoading(true)
     try {
-      const res = await fetch(
-        `https://newsdata.io/api/1/news?apikey=${NEWSDATA_API_KEY}&q=crypto+bitcoin+ethereum&language=pt,en&category=business,technology&size=20`
-      )
-      const data = await res.json()
-      if (data.results) setNews(data.results)
+      const data = await fetchNews()
+      if (Array.isArray(data)) setNews(data)
     } catch (e) {
       console.error('News load error:', e)
     } finally {
