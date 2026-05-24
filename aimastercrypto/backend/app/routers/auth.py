@@ -26,21 +26,28 @@ class RefreshRequest(BaseModel):
 # In-memory user store (replace with DB in production)
 _users: dict = {}
 
+# Admin emails — add yours here or set ADMIN_EMAILS env var
+ADMIN_EMAILS = {"eduardohcorreia@hotmail.com"}
+
+def get_role(email: str) -> str:
+    return "admin" if email.lower() in ADMIN_EMAILS else "free"
+
 
 @router.post("/register")
 async def register(req: RegisterRequest):
     if req.email in _users:
         raise HTTPException(400, "Email already registered")
+    role = get_role(req.email)
     _users[req.email] = {
         "email": req.email,
         "username": req.username,
         "hashed_password": hash_password(req.password),
-        "role": "free",
+        "role": role,
     }
-    access = create_access_token({"sub": req.email, "username": req.username, "role": "free"})
+    access = create_access_token({"sub": req.email, "username": req.username, "role": role})
     refresh = create_refresh_token({"sub": req.email})
     return {"access_token": access, "refresh_token": refresh, "token_type": "bearer",
-            "user": {"email": req.email, "username": req.username, "role": "free"}}
+            "user": {"email": req.email, "username": req.username, "role": role}}
 
 
 @router.post("/login")
