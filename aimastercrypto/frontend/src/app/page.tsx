@@ -7,18 +7,21 @@ import {
   Bell, Settings, ChevronRight, Globe, RefreshCw, Shield, Target,
   ArrowUpRight, ArrowDownRight, Minus, Brain, Waves, Eye, Filter,
   LayoutDashboard, Scan, BookOpen, Radio, PieChart, Lock, X,
+  LogIn, LogOut, UserPlus, User, Plus, Newspaper, CheckCircle,
 } from 'lucide-react'
 import {
   fetchMarketOverview, fetchTrending, fetchCoins, fetchFearGreed,
   analyzeSignal, runScan, runBacktest, fmtPrice, fmtPct, fmtLargeNum,
-  createPriceWebSocket,
+  createPriceWebSocket, login, register, getMe,
 } from '@/lib/api'
 import { useMarketStore, useSignalStore, useUIStore } from '@/stores'
 import enTranslations from '@/locales/en/common.json'
 import ptTranslations from '@/locales/pt/common.json'
 
 const PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 'TON/USDT', 'SUI/USDT']
+const ALL_PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 'TON/USDT', 'SUI/USDT', 'BNB/USDT', 'DOT/USDT', 'MATIC/USDT', 'ATOM/USDT', 'LTC/USDT', 'NEAR/USDT', 'UNI/USDT', 'APT/USDT', 'ARB/USDT', 'OP/USDT']
 const TIMEFRAMES = ['1m', '5m', '15m', '1H', '4H', '1D']
+const NEWSDATA_API_KEY = 'pub_a8a6b45669e248b7802c5894974d98b1'
 
 // ── Translations ─────────────────────────────────────────────────────────────
 function useT() {
@@ -102,8 +105,6 @@ function MetricCard({ label, value, sub, icon: Icon, color = '#00d4ff', change }
 
 function FearGreedGauge({ value, label }: { value: number; label: string }) {
   const color = value >= 75 ? '#00ff88' : value >= 55 ? '#66ff99' : value >= 45 ? '#ffcc00' : value >= 25 ? '#ff8833' : '#ff4466'
-  const rotation = ((value / 100) * 180) - 90
-
   return (
     <div className="glass-card p-4 flex flex-col items-center">
       <div className="text-[10px] font-mono uppercase tracking-widest text-[#8ba3be] mb-3">Fear & Greed</div>
@@ -128,6 +129,16 @@ function SignalCard({ signal }: { signal: any }) {
   if (!signal) return null
   const { bias, confidence, entry, stopLoss, takeProfit, rr, analysis, quality, tags, source, indicators, mtf } = signal
 
+  // translate indicator labels to PT
+  const indLabels: Record<string, string> = {
+    ema: 'EMA', macd: 'MACD', rsi: 'RSI 26', structure: 'Estrutura',
+  }
+  const indPTValues: Record<string, string> = {
+    BEARISH: 'BAIXISTA', BULLISH: 'ALTISTA', NEUTRAL: 'NEUTRO',
+    OVERSOLD: 'SOBREVENDIDO', OVERBOUGHT: 'SOBRECOMPRADO', CHOCH: 'CHOCH',
+  }
+  const translateInd = (v: string) => indPTValues[v] || v
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -140,7 +151,7 @@ function SignalCard({ signal }: { signal: any }) {
         <div className="flex items-center gap-3">
           <BiasBadge bias={bias} />
           <div>
-            <div className="text-xs font-mono text-[#8ba3be]">Confidence</div>
+            <div className="text-xs font-mono text-[#8ba3be]">Confiança</div>
             <div className="text-sm font-bold font-mono" style={{ color: confidence >= 75 ? '#00ff88' : confidence >= 60 ? '#00d4ff' : '#ffcc00' }}>
               {confidence}%
             </div>
@@ -163,9 +174,9 @@ function SignalCard({ signal }: { signal: any }) {
       {/* Levels */}
       <div className="grid grid-cols-3 border-y border-[#1a3a5c] mt-3">
         {[
-          { label: 'Entry', value: fmtPrice(entry), color: '#00d4ff' },
+          { label: 'Entrada', value: fmtPrice(entry), color: '#00d4ff' },
           { label: 'Stop Loss', value: fmtPrice(stopLoss), color: '#ff4466' },
-          { label: 'Take Profit', value: fmtPrice(takeProfit), color: '#00ff88' },
+          { label: 'Alvo', value: fmtPrice(takeProfit), color: '#00ff88' },
         ].map(({ label, value, color }) => (
           <div key={label} className="p-3 text-center border-r border-[#1a3a5c] last:border-r-0">
             <div className="text-[9px] font-mono uppercase tracking-widest text-[#3d5a73] mb-1">{label}</div>
@@ -185,7 +196,7 @@ function SignalCard({ signal }: { signal: any }) {
             <div className="flex items-center gap-1">
               <span className="text-[9px] font-mono uppercase tracking-wider text-[#3d5a73]">MTF </span>
               <span className={`text-xs font-bold font-mono px-1.5 py-0.5 rounded ${mtf.confluence === 'BULLISH' ? 'text-[#00ff88] bg-[#00ff88]/10' : mtf.confluence === 'BEARISH' ? 'text-[#ff4466] bg-[#ff4466]/10' : 'text-[#ffcc00] bg-[#ffcc00]/10'}`}>
-                {mtf.confluence}
+                {translateInd(mtf.confluence)}
               </span>
             </div>
           )}
@@ -193,7 +204,7 @@ function SignalCard({ signal }: { signal: any }) {
         <div className="flex items-center gap-1.5">
           {(tags || []).slice(0, 3).map((tag: string) => (
             <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-[#00d4ff]/5 border border-[#00d4ff]/20 text-[#8ba3be] font-mono">
-              {tag}
+              {translateInd(tag)}
             </span>
           ))}
         </div>
@@ -201,63 +212,80 @@ function SignalCard({ signal }: { signal: any }) {
 
       {/* Indicators */}
       {indicators && (
-        <div className="grid grid-cols-4 gap-1 px-4 py-3 border-b border-[#1a3a5c]">
-          {[
-            { k: 'EMA', v: indicators.ema },
-            { k: 'MACD', v: indicators.macd },
-            { k: `RSI ${indicators.rsi}`, v: indicators.rsi < 35 ? 'OVERSOLD' : indicators.rsi > 65 ? 'OVERBOUGHT' : 'NEUTRAL' },
-            { k: 'STRUCTURE', v: indicators.structure },
-          ].map(({ k, v }) => (
-            <div key={k} className="bg-[#020b14] rounded p-2 text-center">
-              <div className="text-[8px] font-mono uppercase tracking-wider text-[#3d5a73] mb-1">{k}</div>
-              <div className={`text-[10px] font-bold font-mono ${v === 'BULLISH' || v === 'BOS' || v === 'OVERSOLD' ? 'text-[#00ff88]' : v === 'BEARISH' || v === 'CHOCH' || v === 'OVERBOUGHT' ? 'text-[#ff4466]' : 'text-[#ffcc00]'}`}>
-                {v}
+        <div className="grid grid-cols-4 border-b border-[#1a3a5c]">
+          {Object.entries(indicators).map(([key, val]: [string, any]) => {
+            const display = typeof val === 'object' ? val?.signal || val?.trend || JSON.stringify(val) : String(val)
+            const color = ['BULLISH', 'ALTISTA', 'OVERSOLD', 'SOBREVENDIDO'].includes(translateInd(display))
+              ? '#00ff88' : ['BEARISH', 'BAIXISTA'].includes(translateInd(display)) ? '#ff4466' : '#00d4ff'
+            return (
+              <div key={key} className="p-3 text-center border-r border-[#1a3a5c] last:border-r-0">
+                <div className="text-[9px] font-mono uppercase tracking-wider text-[#3d5a73] mb-1">{indLabels[key] || key.toUpperCase()}</div>
+                <div className="text-xs font-bold font-mono" style={{ color }}>{translateInd(display)}</div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
-      {/* Analysis */}
-      <div className="px-4 py-3">
-        <div className="flex items-center gap-1.5 mb-2">
-          <Brain size={12} className="text-[#b366ff]" />
-          <span className="text-[9px] font-mono uppercase tracking-widest text-[#3d5a73]">AI Analysis</span>
+      {/* AI Analysis */}
+      {analysis && (
+        <div className="p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Brain size={12} className="text-[#b366ff]" />
+            <span className="text-[9px] font-mono uppercase tracking-widest text-[#3d5a73]">Análise IA</span>
+          </div>
+          <p className="text-xs text-[#8ba3be] leading-relaxed">{analysis}</p>
         </div>
-        <p className="text-xs text-[#8ba3be] leading-relaxed font-mono">{analysis}</p>
-      </div>
+      )}
     </motion.div>
   )
 }
 
-// ── Scan Results ──────────────────────────────────────────────────────────────
+// ── Scan Result Row ───────────────────────────────────────────────────────────
 
 function ScanResultRow({ signal, onClick }: { signal: any; onClick: () => void }) {
-  const { bias, confidence, scanned_pair: pair, quality, rr } = signal
+  const { bias, confidence, pair, timeframe, quality, entry, stopLoss, takeProfit } = signal
   return (
     <motion.div
-      initial={{ opacity: 0, x: -10 }}
+      initial={{ opacity: 0, x: -8 }}
       animate={{ opacity: 1, x: 0 }}
-      className="flex items-center justify-between p-3 rounded-lg bg-[#071524] hover:bg-[#0c1f35] cursor-pointer transition-all border border-transparent hover:border-[#1a3a5c] group"
       onClick={onClick}
+      className="glass-card p-4 cursor-pointer hover:border-[#00d4ff]/30 transition-all group"
     >
-      <div className="flex items-center gap-3">
-        <BiasBadge bias={bias} />
-        <div>
-          <div className="text-sm font-bold font-mono text-[#e8f4ff]">{pair}</div>
-          <div className="text-[10px] font-mono text-[#3d5a73]">R/R {rr}</div>
-        </div>
-      </div>
-      <div className="flex items-center gap-3">
-        {quality && <GradeBadge grade={quality.grade} />}
-        <div className="text-right">
-          <div className="text-sm font-bold font-mono" style={{ color: confidence >= 75 ? '#00ff88' : '#00d4ff' }}>
-            {confidence}%
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <BiasBadge bias={bias} />
+          <div>
+            <div className="font-bold font-mono text-[#e8f4ff]">{pair}</div>
+            <div className="text-[10px] font-mono text-[#3d5a73]">{timeframe}</div>
           </div>
-          <ConfidenceBar value={confidence} />
         </div>
-        <ChevronRight size={14} className="text-[#3d5a73] group-hover:text-[#00d4ff] transition-colors" />
+        <div className="flex items-center gap-2">
+          {quality && <GradeBadge grade={quality.grade} />}
+          <div className="text-right">
+            <div className="text-xs font-mono font-bold" style={{ color: confidence >= 75 ? '#00ff88' : confidence >= 60 ? '#00d4ff' : '#ffcc00' }}>
+              {confidence}%
+            </div>
+            <div className="text-[9px] font-mono text-[#3d5a73]">confiança</div>
+          </div>
+        </div>
       </div>
+      <ConfidenceBar value={confidence} />
+      <div className="grid grid-cols-3 gap-2 mt-3 text-center">
+        <div>
+          <div className="text-[9px] text-[#3d5a73] font-mono">ENTRADA</div>
+          <div className="text-xs font-bold font-mono text-[#00d4ff]">{fmtPrice(entry)}</div>
+        </div>
+        <div>
+          <div className="text-[9px] text-[#3d5a73] font-mono">STOP</div>
+          <div className="text-xs font-bold font-mono text-[#ff4466]">{fmtPrice(stopLoss)}</div>
+        </div>
+        <div>
+          <div className="text-[9px] text-[#3d5a73] font-mono">ALVO</div>
+          <div className="text-xs font-bold font-mono text-[#00ff88]">{fmtPrice(takeProfit)}</div>
+        </div>
+      </div>
+      <div className="mt-2 text-right text-[9px] font-mono text-[#3d5a73] group-hover:text-[#00d4ff] transition-colors">Ver sinal →</div>
     </motion.div>
   )
 }
@@ -265,17 +293,17 @@ function ScanResultRow({ signal, onClick }: { signal: any; onClick: () => void }
 // ── Backtest Panel ────────────────────────────────────────────────────────────
 
 function BacktestPanel() {
-  const [result, setResult] = useState<any>(null)
-  const [loading, setLoading] = useState(false)
   const [pair, setPair] = useState('BTC/USDT')
   const [tf, setTf] = useState('1H')
-  const t = useT()
+  const [candles, setCandles] = useState(500)
+  const [result, setResult] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
 
   const run = async () => {
     setLoading(true)
     try {
-      const data = await runBacktest(pair, tf, 500)
-      setResult(data)
+      const r = await runBacktest(pair, tf, candles)
+      setResult(r)
     } catch (e) {
       console.error(e)
     } finally {
@@ -284,82 +312,233 @@ function BacktestPanel() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3 flex-wrap">
+    <div className="glass-card p-5 space-y-4">
+      <div className="flex flex-wrap gap-3">
         <select value={pair} onChange={(e) => setPair(e.target.value)}
           className="bg-[#071524] border border-[#1a3a5c] rounded-lg px-3 py-2 text-sm font-mono text-[#e8f4ff] focus:border-[#00d4ff] outline-none">
           {PAIRS.map((p) => <option key={p}>{p}</option>)}
         </select>
-        <select value={tf} onChange={(e) => setTf(e.target.value)}
+        <div className="flex gap-1">
+          {TIMEFRAMES.map((t) => (
+            <button key={t} onClick={() => setTf(t)}
+              className={`px-3 py-2 rounded-lg text-xs font-bold font-mono transition-all ${tf === t ? 'bg-[#00d4ff]/15 text-[#00d4ff] border border-[#00d4ff]/30' : 'text-[#8ba3be] border border-[#1a3a5c] hover:border-[#00d4ff]/20'}`}>
+              {t}
+            </button>
+          ))}
+        </div>
+        <select value={candles} onChange={(e) => setCandles(Number(e.target.value))}
           className="bg-[#071524] border border-[#1a3a5c] rounded-lg px-3 py-2 text-sm font-mono text-[#e8f4ff] focus:border-[#00d4ff] outline-none">
-          {TIMEFRAMES.map((t) => <option key={t}>{t}</option>)}
+          {[100, 250, 500, 1000].map((c) => <option key={c} value={c}>{c} velas</option>)}
         </select>
         <button onClick={run} disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] text-sm font-bold hover:bg-[#00d4ff]/20 disabled:opacity-40 transition-all">
+          className="flex items-center gap-2 px-5 py-2 rounded-lg font-bold text-sm transition-all disabled:opacity-40"
+          style={{ background: '#b366ff15', border: '1px solid #b366ff40', color: '#b366ff' }}>
           {loading ? <RefreshCw size={14} className="animate-spin" /> : <BarChart3 size={14} />}
-          {loading ? t.backtest.running : t.backtest.run}
+          {loading ? 'Executando...' : 'Executar Backtest'}
         </button>
       </div>
 
       {result && (
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: t.backtest.trades, value: result.trades, color: '#00d4ff' },
-              { label: t.backtest.win_rate, value: `${result.win_rate}%`, color: result.win_rate >= 55 ? '#00ff88' : '#ffcc00' },
-              { label: t.backtest.total_pnl, value: `${result.total_pnl_pct > 0 ? '+' : ''}${result.total_pnl_pct}%`, color: result.total_pnl_pct >= 0 ? '#00ff88' : '#ff4466' },
-              { label: t.backtest.max_drawdown, value: `${result.max_drawdown}%`, color: '#ff4466' },
-              { label: t.backtest.sharpe_ratio, value: result.sharpe_ratio, color: '#b366ff' },
-              { label: t.backtest.profit_factor, value: result.profit_factor, color: '#00d4ff' },
-              { label: t.backtest.wins, value: result.wins, color: '#00ff88' },
-              { label: t.backtest.losses, value: result.losses, color: '#ff4466' },
-            ].map(({ label, value, color }) => (
-              <div key={label} className="glass-card p-3 text-center">
-                <div className="text-[9px] font-mono uppercase tracking-wider text-[#3d5a73] mb-1">{label}</div>
-                <div className="text-base font-bold font-mono" style={{ color }}>{value}</div>
-              </div>
-            ))}
-          </div>
-
-          {result.detail?.length > 0 && (
-            <div className="glass-card overflow-hidden">
-              <div className="p-3 border-b border-[#1a3a5c] text-[10px] font-mono uppercase tracking-wider text-[#3d5a73]">
-                Recent Trades (last {result.detail.length})
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs font-mono">
-                  <thead>
-                    <tr className="border-b border-[#1a3a5c]">
-                      {['Bias', 'Entry', 'Exit', 'PnL %', 'Result', 'Balance'].map((h) => (
-                        <th key={h} className="text-left p-2 text-[#3d5a73] font-medium">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.detail.slice(-15).reverse().map((trade: any, i: number) => (
-                      <tr key={i} className="border-b border-[#071524] hover:bg-[#071524]/50 transition-colors">
-                        <td className="p-2"><BiasBadge bias={trade.bias} /></td>
-                        <td className="p-2 text-[#e8f4ff]">{fmtPrice(trade.entry)}</td>
-                        <td className="p-2 text-[#e8f4ff]">{fmtPrice(trade.exit)}</td>
-                        <td className={`p-2 font-bold ${trade.pnl_pct >= 0 ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>
-                          {trade.pnl_pct >= 0 ? '+' : ''}{trade.pnl_pct}%
-                        </td>
-                        <td className="p-2">
-                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${trade.result === 'WIN' ? 'badge-long' : 'badge-short'}`}>
-                            {trade.result}
-                          </span>
-                        </td>
-                        <td className="p-2 text-[#00d4ff]">${trade.balance.toFixed(0)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {[
+            { label: 'Total Operações', value: result.total_trades, color: '#00d4ff' },
+            { label: 'Taxa de Acerto', value: `${result.win_rate?.toFixed(1)}%`, color: result.win_rate >= 50 ? '#00ff88' : '#ff4466' },
+            { label: 'PnL Total', value: `${result.total_pnl?.toFixed(2)}%`, color: result.total_pnl >= 0 ? '#00ff88' : '#ff4466' },
+            { label: 'Max Drawdown', value: `${result.max_drawdown?.toFixed(1)}%`, color: '#ff4466' },
+            { label: 'Sharpe', value: result.sharpe_ratio?.toFixed(2), color: '#b366ff' },
+            { label: 'Fator de Lucro', value: result.profit_factor?.toFixed(2), color: '#ffcc00' },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="glass-card p-3 text-center">
+              <div className="text-[9px] font-mono uppercase tracking-wider text-[#3d5a73] mb-1">{label}</div>
+              <div className="text-lg font-bold font-mono" style={{ color }}>{value}</div>
             </div>
-          )}
-        </motion.div>
+          ))}
+        </div>
       )}
     </div>
+  )
+}
+
+// ── Auth Modal ────────────────────────────────────────────────────────────────
+
+function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (user: any, token: string) => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSubmit = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      let data
+      if (mode === 'login') {
+        data = await login(email, password)
+      } else {
+        data = await register(email, username, password)
+      }
+      localStorage.setItem('access_token', data.access_token)
+      if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
+      onSuccess(data.user, data.access_token)
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Erro ao autenticar. Verifique os dados.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(2,11,20,0.85)', backdropFilter: 'blur(8px)' }}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="glass-card w-full max-w-md p-6 relative"
+      >
+        <button onClick={onClose} className="absolute top-4 right-4 text-[#3d5a73] hover:text-[#e8f4ff] transition-colors">
+          <X size={18} />
+        </button>
+
+        {/* Logo */}
+        <div className="flex items-center gap-2.5 mb-6">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #00d4ff, #0066aa)' }}>
+            <Brain size={16} className="text-white" />
+          </div>
+          <span className="text-base font-bold gradient-text">AIMasterCrypto</span>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 mb-5 p-1 bg-[#0c1f35] rounded-lg">
+          {(['login', 'register'] as const).map((m) => (
+            <button key={m} onClick={() => setMode(m)}
+              className={`flex-1 py-2 rounded-md text-xs font-bold font-mono transition-all ${mode === m ? 'bg-[#00d4ff]/15 text-[#00d4ff] border border-[#00d4ff]/30' : 'text-[#8ba3be] hover:text-[#e8f4ff]'}`}>
+              {m === 'login' ? 'Entrar' : 'Registar'}
+            </button>
+          ))}
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] font-mono uppercase tracking-wider text-[#8ba3be] mb-1 block">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="email@exemplo.com"
+              className="w-full bg-[#071524] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm font-mono text-[#e8f4ff] focus:border-[#00d4ff] outline-none transition-colors"
+            />
+          </div>
+          {mode === 'register' && (
+            <div>
+              <label className="text-[10px] font-mono uppercase tracking-wider text-[#8ba3be] mb-1 block">Username</label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="o_teu_username"
+                className="w-full bg-[#071524] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm font-mono text-[#e8f4ff] focus:border-[#00d4ff] outline-none transition-colors"
+              />
+            </div>
+          )}
+          <div>
+            <label className="text-[10px] font-mono uppercase tracking-wider text-[#8ba3be] mb-1 block">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+              className="w-full bg-[#071524] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm font-mono text-[#e8f4ff] focus:border-[#00d4ff] outline-none transition-colors"
+            />
+          </div>
+
+          {error && (
+            <div className="text-xs text-[#ff4466] font-mono bg-[#ff4466]/10 border border-[#ff4466]/20 rounded-lg p-2">
+              {error}
+            </div>
+          )}
+
+          <button onClick={handleSubmit} disabled={loading}
+            className="w-full py-3 rounded-lg font-bold text-sm transition-all disabled:opacity-40 flex items-center justify-center gap-2 mt-2"
+            style={{ background: 'linear-gradient(135deg, #00d4ff22, #0099bb22)', border: '1px solid #00d4ff44', color: '#00d4ff' }}>
+            {loading ? <RefreshCw size={14} className="animate-spin" /> : mode === 'login' ? <LogIn size={14} /> : <UserPlus size={14} />}
+            {loading ? 'A processar...' : mode === 'login' ? 'Entrar' : 'Criar conta'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+// ── Add Pair Modal ────────────────────────────────────────────────────────────
+
+function AddPairModal({ watchlist, onAdd, onClose }: { watchlist: string[]; onAdd: (p: string) => void; onClose: () => void }) {
+  const [search, setSearch] = useState('')
+  const filtered = ALL_PAIRS.filter(p => p.toLowerCase().includes(search.toLowerCase()) && !watchlist.includes(p))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(2,11,20,0.85)', backdropFilter: 'blur(8px)' }}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="glass-card w-full max-w-sm p-5 relative"
+      >
+        <button onClick={onClose} className="absolute top-4 right-4 text-[#3d5a73] hover:text-[#e8f4ff] transition-colors">
+          <X size={18} />
+        </button>
+        <h3 className="font-bold text-sm mb-4">Adicionar par aos favoritos</h3>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Pesquisar par..."
+          className="w-full bg-[#071524] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm font-mono text-[#e8f4ff] focus:border-[#00d4ff] outline-none mb-3"
+        />
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+          {filtered.map(p => (
+            <button key={p} onClick={() => { onAdd(p); onClose() }}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-[#0c1f35] transition-colors text-sm font-mono text-[#e8f4ff]">
+              <span>{p}</span>
+              <Plus size={14} className="text-[#00d4ff]" />
+            </button>
+          ))}
+          {filtered.length === 0 && <div className="text-xs text-[#3d5a73] font-mono text-center py-4">Nenhum par encontrado</div>}
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+// ── News Card ─────────────────────────────────────────────────────────────────
+
+function NewsCard({ article }: { article: any }) {
+  const sentiment = article.sentiment || 'neutral'
+  const color = sentiment === 'positive' ? '#00ff88' : sentiment === 'negative' ? '#ff4466' : '#8ba3be'
+  return (
+    <a href={article.link} target="_blank" rel="noopener noreferrer"
+      className="glass-card p-4 hover:border-[#00d4ff]/30 transition-all block">
+      <div className="flex items-start gap-3">
+        {article.image_url && (
+          <img src={article.image_url} alt="" className="w-16 h-12 object-cover rounded-md shrink-0" onError={(e: any) => { e.target.style.display = 'none' }} />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ color, background: `${color}15`, border: `1px solid ${color}30` }}>
+              {sentiment === 'positive' ? 'POSITIVO' : sentiment === 'negative' ? 'NEGATIVO' : 'NEUTRO'}
+            </span>
+            <span className="text-[9px] font-mono text-[#3d5a73]">{article.source_id?.toUpperCase()}</span>
+          </div>
+          <div className="text-sm font-semibold text-[#e8f4ff] leading-snug line-clamp-2 mb-1">{article.title}</div>
+          {article.description && (
+            <div className="text-xs text-[#8ba3be] line-clamp-2 leading-relaxed">{article.description}</div>
+          )}
+          <div className="text-[9px] font-mono text-[#3d5a73] mt-2">
+            {article.pubDate ? new Date(article.pubDate).toLocaleString('pt-PT') : ''}
+          </div>
+        </div>
+      </div>
+    </a>
   )
 }
 
@@ -373,6 +552,27 @@ export default function Home() {
 
   const [scanTf, setScanTf] = useState('1H')
   const wsRef = useRef<WebSocket | null>(null)
+
+  // Auth state
+  const [user, setUser] = useState<any>(null)
+  const [showAuthModal, setShowAuthModal] = useState(false)
+  const [showAddPairModal, setShowAddPairModal] = useState(false)
+
+  // News state
+  const [news, setNews] = useState<any[]>([])
+  const [newsLoading, setNewsLoading] = useState(false)
+  const [newsFilter, setNewsFilter] = useState<'all' | 'positive' | 'negative'>('all')
+
+  // Check existing auth on load
+  useEffect(() => {
+    const token = localStorage.getItem('access_token')
+    if (token) {
+      getMe().then(setUser).catch(() => {
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+      })
+    }
+  }, [])
 
   // Load market data
   useEffect(() => {
@@ -402,6 +602,26 @@ export default function Home() {
     return () => wsRef.current?.close()
   }, [])
 
+  // Load news from newsdata.io
+  const loadNews = async () => {
+    setNewsLoading(true)
+    try {
+      const res = await fetch(
+        `https://newsdata.io/api/1/news?apikey=${NEWSDATA_API_KEY}&q=crypto+bitcoin+ethereum&language=pt,en&category=business,technology&size=20`
+      )
+      const data = await res.json()
+      if (data.results) setNews(data.results)
+    } catch (e) {
+      console.error('News load error:', e)
+    } finally {
+      setNewsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'news') loadNews()
+  }, [activeTab])
+
   const handleAnalyze = async () => {
     setLoadingSignal(true)
     try {
@@ -427,6 +647,12 @@ export default function Home() {
     }
   }
 
+  const handleLogout = () => {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    setUser(null)
+  }
+
   const navItems = [
     { id: 'dashboard', label: t.nav.dashboard, icon: LayoutDashboard },
     { id: 'scanner', label: t.nav.scanner, icon: Scan },
@@ -436,11 +662,31 @@ export default function Home() {
     { id: 'news', label: t.nav.news, icon: BookOpen },
   ]
 
-  const topCoins = [...(coins || [])]
-    .sort((a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h)
+  const topCoins = [...(coins || [])].sort((a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h)
+  const filteredNews = news.filter(n => newsFilter === 'all' ? true : n.sentiment === newsFilter)
+
+  // TradingView interval mapping (support seconds)
+  const tvInterval = selectedTf === '1m' ? '1S' : selectedTf === '5m' ? '5' : selectedTf === '15m' ? '15' : selectedTf === '1H' ? '60' : selectedTf === '4H' ? '240' : 'D'
 
   return (
     <div className="min-h-screen" style={{ background: '#020b14' }}>
+      {/* Auth Modal */}
+      {showAuthModal && (
+        <AuthModal
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={(u, token) => { setUser(u); setShowAuthModal(false) }}
+        />
+      )}
+
+      {/* Add Pair Modal */}
+      {showAddPairModal && (
+        <AddPairModal
+          watchlist={watchlist}
+          onAdd={addToWatchlist}
+          onClose={() => setShowAddPairModal(false)}
+        />
+      )}
+
       {/* Ambient background */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 left-1/4 w-96 h-96 rounded-full opacity-[0.03] blur-3xl"
@@ -486,6 +732,29 @@ export default function Home() {
               <Globe size={12} />
               <span className="uppercase">{language}</span>
             </button>
+
+            {user ? (
+              <div className="flex items-center gap-2">
+                <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0c1f35] border border-[#1a3a5c]">
+                  <User size={12} className="text-[#00d4ff]" />
+                  <span className="text-xs font-mono text-[#e8f4ff]">{user.username || user.email?.split('@')[0]}</span>
+                  {user.role === 'admin' && <span className="text-[9px] px-1 rounded bg-[#b366ff]/20 text-[#b366ff] font-mono">ADMIN</span>}
+                </div>
+                <button onClick={handleLogout}
+                  className="w-8 h-8 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#ff4466] hover:border-[#ff4466]/30 transition-all"
+                  title="Sair">
+                  <LogOut size={14} />
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setShowAuthModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all"
+                style={{ background: '#00d4ff15', border: '1px solid #00d4ff40', color: '#00d4ff' }}>
+                <LogIn size={12} />
+                Entrar
+              </button>
+            )}
+
             <button className="w-8 h-8 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#00d4ff] hover:border-[#00d4ff]/30 transition-all">
               <Bell size={14} />
             </button>
@@ -513,7 +782,7 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <h1 className="text-lg font-bold">{t.dashboard.title}</h1>
                 <div className="text-[10px] font-mono text-[#3d5a73]">
-                  {new Date().toLocaleString()}
+                  {new Date().toLocaleString('pt-PT')}
                 </div>
               </div>
 
@@ -636,7 +905,7 @@ export default function Home() {
                       className="w-full py-2.5 rounded-lg font-bold text-sm transition-all disabled:opacity-40 flex items-center justify-center gap-2"
                       style={{ background: 'linear-gradient(135deg, #00d4ff22, #0099bb22)', border: '1px solid #00d4ff44', color: '#00d4ff' }}>
                       {isLoadingSignal ? <RefreshCw size={14} className="animate-spin" /> : <Brain size={14} />}
-                      {isLoadingSignal ? 'Analyzing...' : 'Get AI Signal'}
+                      {isLoadingSignal ? 'Analisando...' : 'Obter Sinal IA'}
                     </button>
                   </div>
                 </div>
@@ -667,25 +936,49 @@ export default function Home() {
                 </div>
               </div>
 
-              {scanResults.length > 0 && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {[
-                    { label: t.scanner.scanned, value: PAIRS.length, color: '#00d4ff' },
-                    { label: t.scanner.actionable, value: scanResults.filter((s: any) => s.bias !== 'WAIT').length, color: '#00ff88' },
-                    { label: 'Best Grade', value: scanResults[0]?.quality?.grade || '—', color: '#b366ff' },
-                  ].map(({ label, value, color }) => (
-                    <div key={label} className="glass-card p-3 text-center">
-                      <div className="text-[9px] font-mono uppercase tracking-wider text-[#3d5a73]">{label}</div>
-                      <div className="text-xl font-bold font-mono mt-1" style={{ color }}>{value}</div>
-                    </div>
-                  ))}
+              {/* Stats — sempre visíveis */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { label: t.scanner.scanned, value: scanResults.length > 0 ? PAIRS.length : PAIRS.length, color: '#00d4ff', sub: `${PAIRS.length} pares disponíveis` },
+                  { label: t.scanner.actionable, value: scanResults.filter((s: any) => s.bias !== 'WAIT').length || '—', color: '#00ff88', sub: scanResults.length > 0 ? 'sinais ativos' : 'clique em Escanear' },
+                  { label: 'Melhor Nota', value: scanResults[0]?.quality?.grade || '—', color: '#b366ff', sub: scanResults.length > 0 ? scanResults[0]?.pair : 'após scan' },
+                ].map(({ label, value, color, sub }) => (
+                  <div key={label} className="glass-card p-4 text-center">
+                    <div className="text-[9px] font-mono uppercase tracking-wider text-[#3d5a73] mb-1">{label}</div>
+                    <div className="text-2xl font-bold font-mono mt-1" style={{ color }}>{value}</div>
+                    <div className="text-[10px] font-mono text-[#3d5a73] mt-1">{sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Pares monitorados */}
+              {scanResults.length === 0 && !isScanning && (
+                <div className="glass-card p-4">
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-[#3d5a73] mb-3">Pares a monitorizar</div>
+                  <div className="flex flex-wrap gap-2">
+                    {PAIRS.map((pair) => {
+                      const coin = (coins || []).find((c: any) => c.symbol?.toUpperCase() === pair.split('/')[0])
+                      const price = prices[pair] || coin?.current_price
+                      const change = coin?.price_change_percentage_24h
+                      return (
+                        <div key={pair} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#0c1f35] border border-[#1a3a5c]">
+                          {coin?.image && <img src={coin.image} alt="" className="w-4 h-4 rounded-full" />}
+                          <span className="text-xs font-bold font-mono text-[#e8f4ff]">{pair.split('/')[0]}</span>
+                          {price && <span className="text-xs font-mono text-[#8ba3be]">{fmtPrice(price)}</span>}
+                          {change !== undefined && (
+                            <span className={`text-[10px] font-mono ${change >= 0 ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>{fmtPct(change)}</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
 
               {isScanning ? (
                 <div className="glass-card p-8 flex flex-col items-center justify-center gap-3">
                   <div className="w-12 h-12 rounded-full border-2 border-[#00d4ff]/30 border-t-[#00d4ff] animate-spin" />
-                  <div className="text-sm font-mono text-[#8ba3be]">Scanning {PAIRS.length} pairs with AI...</div>
+                  <div className="text-sm font-mono text-[#8ba3be]">A escanear {PAIRS.length} pares com IA...</div>
                 </div>
               ) : scanResults.length > 0 ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -697,17 +990,11 @@ export default function Home() {
                   ))}
                   {scanResults.filter((s: any) => s.bias === 'WAIT').length > 0 && (
                     <div className="glass-card p-4 text-center text-sm text-[#3d5a73] font-mono col-span-full">
-                      + {scanResults.filter((s: any) => s.bias === 'WAIT').length} pairs in WAIT mode
+                      + {scanResults.filter((s: any) => s.bias === 'WAIT').length} pares em modo AGUARDAR
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="glass-card p-12 flex flex-col items-center justify-center gap-3 text-center">
-                  <Scan size={40} className="text-[#1a3a5c]" />
-                  <div className="text-sm font-bold text-[#3d5a73]">Ready to scan</div>
-                  <div className="text-xs text-[#3d5a73] font-mono">Select a timeframe and click Scan All Pairs</div>
-                </div>
-              )}
+              ) : null}
             </motion.div>
           )}
 
@@ -732,7 +1019,7 @@ export default function Home() {
                   className="flex items-center gap-2 px-5 py-2 rounded-lg font-bold text-sm transition-all disabled:opacity-40"
                   style={{ background: '#00d4ff15', border: '1px solid #00d4ff40', color: '#00d4ff' }}>
                   {isLoadingSignal ? <RefreshCw size={14} className="animate-spin" /> : <Brain size={14} />}
-                  {isLoadingSignal ? 'Analyzing...' : t.scanner.analyze}
+                  {isLoadingSignal ? 'Analisando...' : t.scanner.analyze}
                 </button>
                 {prices[selectedPair] && (
                   <div className="ml-auto flex items-center gap-2 px-3 py-2 rounded-lg bg-[#071524] border border-[#1a3a5c]">
@@ -744,15 +1031,19 @@ export default function Home() {
                 )}
               </div>
 
-              {/* TradingView Widget */}
-              <div className="glass-card overflow-hidden" style={{ height: 400 }}>
+              {/* TradingView Widget — com intervalo em segundos para 1m */}
+              <div className="glass-card overflow-hidden" style={{ height: 420 }}>
                 <div className="p-3 border-b border-[#1a3a5c] flex items-center gap-2">
                   <BarChart3 size={14} className="text-[#00d4ff]" />
                   <span className="text-xs font-mono text-[#8ba3be]">{selectedPair} · {selectedTf} · TradingView</span>
+                  {selectedTf === '1m' && (
+                    <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-[#00ff88]/10 text-[#00ff88] font-mono border border-[#00ff88]/20">⚡ 1S live</span>
+                  )}
                 </div>
-                <div style={{ height: 360 }}>
+                <div style={{ height: 380 }}>
                   <iframe
-                    src={`https://s.tradingview.com/widgetembed/?frameElementId=tv&symbol=${selectedPair.replace('/', '')}&interval=${selectedTf === '1H' ? '60' : selectedTf === '4H' ? '240' : selectedTf === '1D' ? 'D' : selectedTf.replace('m', '')}&theme=dark&style=1&locale=en&toolbar_bg=%23020b14&hide_side_toolbar=0&allow_symbol_change=1&withdateranges=1&hideideas=1`}
+                    key={`${selectedPair}-${selectedTf}`}
+                    src={`https://s.tradingview.com/widgetembed/?frameElementId=tv&symbol=BINANCE:${selectedPair.replace('/', '')}&interval=${tvInterval}&theme=dark&style=1&locale=pt&toolbar_bg=%23020b14&hide_side_toolbar=0&allow_symbol_change=1&withdateranges=1&hideideas=1&save_image=0`}
                     className="w-full h-full border-0"
                     style={{ background: '#020b14' }}
                   />
@@ -762,14 +1053,14 @@ export default function Home() {
               {isLoadingSignal ? (
                 <div className="glass-card p-8 flex flex-col items-center gap-3">
                   <div className="w-12 h-12 rounded-full border-2 border-[#00d4ff]/30 border-t-[#00d4ff] animate-spin" />
-                  <div className="text-sm font-mono text-[#8ba3be]">AI analyzing {selectedPair} {selectedTf}...</div>
+                  <div className="text-sm font-mono text-[#8ba3be]">IA analisando {selectedPair} {selectedTf}...</div>
                 </div>
               ) : currentSignal ? (
                 <SignalCard signal={currentSignal} />
               ) : (
                 <div className="glass-card p-12 text-center">
                   <Zap size={40} className="text-[#1a3a5c] mx-auto mb-3" />
-                  <div className="text-sm text-[#3d5a73] font-mono">Select a pair and timeframe, then click Analyze</div>
+                  <div className="text-sm text-[#3d5a73] font-mono">Seleciona um par e timeframe, depois clica em Analisar</div>
                 </div>
               )}
             </motion.div>
@@ -783,59 +1074,137 @@ export default function Home() {
             </motion.div>
           )}
 
-          {/* ─────────────────────────── WATCHLIST ───────────────────────────── */}
+          {/* ─────────────────────────── FAVORITOS ───────────────────────────── */}
           {activeTab === 'watchlist' && (
             <motion.div key="watchlist" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
               <div className="flex items-center justify-between">
-                <h1 className="text-lg font-bold">{t.nav.watchlist}</h1>
-                <span className="text-xs font-mono text-[#3d5a73]">{watchlist.length} pairs</span>
+                <div>
+                  <h1 className="text-lg font-bold">{t.nav.watchlist}</h1>
+                  <div className="text-xs font-mono text-[#3d5a73] mt-0.5">
+                    {watchlist.length} {watchlist.length === 1 ? 'par' : 'pares'} guardados
+                  </div>
+                </div>
+                <button onClick={() => setShowAddPairModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all"
+                  style={{ background: '#00ff8815', border: '1px solid #00ff8840', color: '#00ff88' }}>
+                  <Plus size={14} />
+                  Adicionar par
+                </button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {PAIRS.map((pair) => {
-                  const coin = (coins || []).find((c: any) =>
-                    c.symbol?.toUpperCase() === pair.split('/')[0]
-                  )
-                  const price = prices[pair] || coin?.current_price
-                  const change = coin?.price_change_percentage_24h
-                  const isWatched = watchlist.includes(pair)
-                  return (
-                    <div key={pair} className="glass-card p-4 hover:border-[#00d4ff]/30 transition-all">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          {coin?.image && <img src={coin.image} alt={pair} className="w-7 h-7 rounded-full" />}
-                          <span className="font-bold">{pair.split('/')[0]}</span>
+
+              {watchlist.length === 0 ? (
+                <div className="glass-card p-12 text-center">
+                  <Star size={40} className="text-[#1a3a5c] mx-auto mb-3" />
+                  <div className="text-sm font-bold text-[#3d5a73] mb-2">Sem favoritos ainda</div>
+                  <div className="text-xs text-[#3d5a73] font-mono mb-4">Clica em "Adicionar par" para começar</div>
+                  <button onClick={() => setShowAddPairModal(true)}
+                    className="px-4 py-2 rounded-lg text-xs font-bold font-mono text-[#00d4ff] border border-[#00d4ff]/30 hover:bg-[#00d4ff]/10 transition-all">
+                    + Adicionar primeiro par
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {watchlist.map((pair) => {
+                    const coin = (coins || []).find((c: any) =>
+                      c.symbol?.toUpperCase() === pair.split('/')[0]
+                    )
+                    const price = prices[pair] || coin?.current_price
+                    const change = coin?.price_change_percentage_24h
+                    return (
+                      <div key={pair} className="glass-card p-4 hover:border-[#00d4ff]/30 transition-all">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            {coin?.image && <img src={coin.image} alt={pair} className="w-7 h-7 rounded-full" />}
+                            <div>
+                              <span className="font-bold">{pair.split('/')[0]}</span>
+                              <div className="text-[9px] font-mono text-[#3d5a73]">{coin?.name || pair}</div>
+                            </div>
+                          </div>
+                          <button onClick={() => removeFromWatchlist(pair)}
+                            className="p-1.5 rounded-md transition-all text-[#ffcc00] hover:text-[#ff4466] hover:bg-[#ff4466]/10"
+                            title="Remover dos favoritos">
+                            <Star size={14} fill="currentColor" />
+                          </button>
                         </div>
-                        <button onClick={() => isWatched ? removeFromWatchlist(pair) : addToWatchlist(pair)}
-                          className={`p-1.5 rounded-md transition-all ${isWatched ? 'text-[#ffcc00]' : 'text-[#3d5a73] hover:text-[#ffcc00]'}`}>
-                          <Star size={14} fill={isWatched ? 'currentColor' : 'none'} />
+                        <div className="flex items-end justify-between mb-3">
+                          <div className="text-xl font-bold font-mono text-[#e8f4ff]">{fmtPrice(price || 0)}</div>
+                          {change !== undefined && (
+                            <div className={`text-sm font-bold font-mono flex items-center gap-1 ${change >= 0 ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>
+                              {change >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+                              {fmtPct(change)}
+                            </div>
+                          )}
+                        </div>
+                        {coin && (
+                          <div className="text-[10px] font-mono text-[#3d5a73] mb-3">
+                            Cap: {fmtLargeNum(coin.market_cap)}
+                          </div>
+                        )}
+                        <button onClick={() => { setSelectedPair(pair); handleAnalyze() }}
+                          className="w-full py-1.5 rounded-md text-xs font-bold font-mono text-[#00d4ff] border border-[#00d4ff]/20 hover:bg-[#00d4ff]/10 transition-all">
+                          Analisar
                         </button>
                       </div>
-                      <div className="text-xl font-bold font-mono text-[#e8f4ff] mb-1">{fmtPrice(price || 0)}</div>
-                      {change !== undefined && (
-                        <div className={`text-sm font-bold font-mono flex items-center gap-1 ${change >= 0 ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>
-                          {change >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-                          {fmtPct(change)}
-                        </div>
-                      )}
-                      <button onClick={() => { setSelectedPair(pair); handleAnalyze() }}
-                        className="mt-3 w-full py-1.5 rounded-md text-xs font-bold font-mono text-[#00d4ff] border border-[#00d4ff]/20 hover:bg-[#00d4ff]/10 transition-all">
-                        Analyze
-                      </button>
+                    )
+                  })}
+
+                  {/* Add more card */}
+                  <button onClick={() => setShowAddPairModal(true)}
+                    className="glass-card p-4 border-dashed hover:border-[#00d4ff]/30 transition-all flex flex-col items-center justify-center gap-2 min-h-[160px]">
+                    <div className="w-10 h-10 rounded-full border border-[#1a3a5c] flex items-center justify-center">
+                      <Plus size={18} className="text-[#3d5a73]" />
                     </div>
-                  )
-                })}
-              </div>
+                    <span className="text-xs font-mono text-[#3d5a73]">Adicionar par</span>
+                  </button>
+                </div>
+              )}
             </motion.div>
           )}
 
-          {/* ─────────────────────────── NEWS ────────────────────────────────── */}
+          {/* ─────────────────────────── NOTÍCIAS ────────────────────────────── */}
           {activeTab === 'news' && (
             <motion.div key="news" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-              <h1 className="text-lg font-bold">{t.nav.news}</h1>
-              <div className="text-sm text-[#8ba3be] glass-card p-8 text-center">
-                <BookOpen size={32} className="mx-auto mb-3 text-[#1a3a5c]" />
-                News feed connects to CryptoPanic API. Configure <code className="text-[#00d4ff]">CRYPTOPANIC_API_KEY</code> to enable.
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h1 className="text-lg font-bold">{t.nav.news}</h1>
+                  <div className="text-xs font-mono text-[#3d5a73] mt-0.5">via newsdata.io</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {(['all', 'positive', 'negative'] as const).map((f) => (
+                    <button key={f} onClick={() => setNewsFilter(f)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-bold font-mono transition-all ${newsFilter === f
+                        ? f === 'positive' ? 'bg-[#00ff88]/15 text-[#00ff88] border border-[#00ff88]/30'
+                          : f === 'negative' ? 'bg-[#ff4466]/15 text-[#ff4466] border border-[#ff4466]/30'
+                          : 'bg-[#00d4ff]/15 text-[#00d4ff] border border-[#00d4ff]/30'
+                        : 'text-[#8ba3be] border border-[#1a3a5c] hover:border-[#00d4ff]/20'}`}>
+                      {f === 'all' ? 'Todas' : f === 'positive' ? 'Positivas' : 'Negativas'}
+                    </button>
+                  ))}
+                  <button onClick={loadNews} disabled={newsLoading}
+                    className="w-8 h-8 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#00d4ff] transition-all disabled:opacity-40">
+                    <RefreshCw size={13} className={newsLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
               </div>
+
+              {newsLoading ? (
+                <div className="glass-card p-12 flex flex-col items-center gap-3">
+                  <div className="w-10 h-10 rounded-full border-2 border-[#00d4ff]/30 border-t-[#00d4ff] animate-spin" />
+                  <div className="text-sm font-mono text-[#8ba3be]">A carregar notícias...</div>
+                </div>
+              ) : filteredNews.length > 0 ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {filteredNews.map((article, i) => (
+                    <NewsCard key={i} article={article} />
+                  ))}
+                </div>
+              ) : (
+                <div className="glass-card p-12 text-center">
+                  <Newspaper size={40} className="text-[#1a3a5c] mx-auto mb-3" />
+                  <div className="text-sm font-bold text-[#3d5a73] mb-1">Sem notícias disponíveis</div>
+                  <div className="text-xs text-[#3d5a73] font-mono">Clica em atualizar para carregar</div>
+                </div>
+              )}
             </motion.div>
           )}
 
