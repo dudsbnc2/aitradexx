@@ -326,38 +326,55 @@ async def search_dex_pair(query: str) -> list:
 
 async def get_crypto_news(currencies: Optional[str] = None) -> list:
     cache_key = f"news:{currencies or 'general'}"
+
     cached = await cache_get(cache_key)
     if cached:
         return cached
 
     c = get_http_client()
+
     try:
-        api_key = settings.NEWSDATA_API_KEY or "pub_a8a6b45669e248b7802c5894974d98b1"
-        params: dict = {
+        api_key = settings.NEWSDATA_API_KEY
+
+        if not api_key:
+            logger.warning("NEWSDATA_API_KEY missing")
+            return []
+
+        params = {
             "apikey": api_key,
-            "q": currencies if currencies else "crypto bitcoin ethereum",
-            "language": "pt,en",
-            "category": "business,technology",
-            "size": 20,
+            "q": currencies or "bitcoin OR ethereum OR crypto",
+            "language": "en",
+            "size": 10,
         }
-        r = await c.get("https://newsdata.io/api/1/news", params=params)
-        r.raise_for_status()
-        articles = r.json().get("results", [])
-        result = [
-            {
+
+        r = await c.get(
+            "https://newsdata.io/api/1/news",
+            params=params,
+            timeout=20
+        )
+
+        data = r.json()
+
+        logger.info(f"News API response: {data}")
+
+        articles = data.get("results", [])
+
+        result = []
+
+        for a in articles:
+            result.append({
                 "title": a.get("title"),
                 "link": a.get("link"),
                 "description": a.get("description"),
                 "source_id": a.get("source_id"),
                 "image_url": a.get("image_url"),
                 "pubDate": a.get("pubDate"),
-                "sentiment": a.get("sentiment"),
-                "keywords": a.get("keywords", []),
-            }
-            for a in articles
-        ]
+            })
+
         await cache_set(cache_key, result, ttl=300)
+
         return result
+
     except Exception as e:
-        logger.warning(f"Newsdata.io: {e}")
+        logger.warning(f"News fetch failed: {e}")
         return []
