@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # External APIs
     CRYPTOCOMPARE_API_KEY: str = ""
     CRYPTOPANIC_API_KEY: str = ""
+    NEWSDATA_API_KEY: str = "pub_a8a6b45669e248b7802c5894974d98b1"
 
     # Telegram
     TELEGRAM_TOKEN: str = ""
