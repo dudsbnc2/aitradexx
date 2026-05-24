@@ -331,28 +331,32 @@ async def get_crypto_news(currencies: Optional[str] = None) -> list:
         return cached
 
     c = get_http_client()
-    params: dict = {"public": "true", "kind": "news"}
-    if settings.CRYPTOPANIC_API_KEY:
-        params["auth_token"] = settings.CRYPTOPANIC_API_KEY
-    if currencies:
-        params["currencies"] = currencies
     try:
-        r = await c.get("https://cryptopanic.com/api/v1/posts/", params=params)
+        params: dict = {
+            "apikey": settings.NEWSDATA_API_KEY,
+            "q": currencies if currencies else "crypto bitcoin ethereum",
+            "language": "pt,en",
+            "category": "business,technology",
+            "size": 20,
+        }
+        r = await c.get("https://newsdata.io/api/1/news", params=params)
         r.raise_for_status()
-        posts = r.json().get("results", [])[:15]
+        articles = r.json().get("results", [])
         result = [
             {
-                "title": p.get("title"),
-                "url": p.get("url"),
-                "source": p.get("source", {}).get("title"),
-                "published_at": p.get("published_at"),
-                "currencies": [c2.get("code") for c2 in p.get("currencies", [])],
-                "votes": p.get("votes", {}),
+                "title": a.get("title"),
+                "link": a.get("link"),
+                "description": a.get("description"),
+                "source_id": a.get("source_id"),
+                "image_url": a.get("image_url"),
+                "pubDate": a.get("pubDate"),
+                "sentiment": a.get("sentiment"),
+                "keywords": a.get("keywords", []),
             }
-            for p in posts
+            for a in articles
         ]
         await cache_set(cache_key, result, ttl=300)
         return result
     except Exception as e:
-        logger.warning(f"CryptoPanic: {e}")
+        logger.warning(f"Newsdata.io: {e}")
         return []
