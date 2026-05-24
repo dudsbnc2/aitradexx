@@ -12,7 +12,7 @@ import {
 import {
   fetchMarketOverview, fetchTrending, fetchCoins, fetchFearGreed,
   analyzeSignal, runScan, runBacktest, fmtPrice, fmtPct, fmtLargeNum,
-  createPriceWebSocket, login, register, getMe,
+  fetchNews, createPriceWebSocket, login, register, getMe,
 } from '@/lib/api'
 import { useMarketStore, useSignalStore, useUIStore } from '@/stores'
 import enTranslations from '@/locales/en/common.json'
