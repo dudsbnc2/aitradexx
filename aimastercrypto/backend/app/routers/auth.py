@@ -24,9 +24,24 @@ class RefreshRequest(BaseModel):
 
 
 # In-memory user store (replace with DB in production)
-_users: dict = {}
+# Admin pre-seeded — always exists even after restart
+def _make_default_users():
+    from app.core.auth import hash_password as _hp
+    return {
+        "eduardohcorreia@hotmail.com": {
+            "email": "eduardohcorreia@hotmail.com",
+            "username": "dudspt",
+            "hashed_password": _hp("Admin2024!"),  # change after first login
+            "role": "admin",
+        },
+    }
 
-# Admin emails — add yours here or set ADMIN_EMAILS env var
+try:
+    _users: dict = _make_default_users()
+except Exception:
+    _users: dict = {}
+
+# Admin emails — used when new users register
 ADMIN_EMAILS = {"eduardohcorreia@hotmail.com"}
 
 def get_role(email: str) -> str:
