@@ -122,7 +122,12 @@ app.include_router(ws.router)
 
 @app.get("/health")
 async def health():
-    r = await get_redis()
+    try:
+        r = await get_redis()
+        redis_ok = bool(r)
+    except Exception:
+        redis_ok = False
+
     return {
         "status": "ok",
         "version": settings.VERSION,
@@ -133,7 +138,7 @@ async def health():
         },
         "services": {
             "db": bool(settings.DATABASE_URL),
-            "redis": bool(r),
+            "redis": redis_ok,
             "telegram": bool(settings.TELEGRAM_TOKEN),
         },
         "ws_connections": ws_manager.total_connections,
