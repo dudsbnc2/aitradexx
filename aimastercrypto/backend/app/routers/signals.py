@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from app.services.signal_service import run_signal, run_scan, score_quality
 from app.services.ta_engine import backtest_rule_engine
-from app.services.data_fetcher import fetch_candles, compute_indicators as _ci
+from app.services.data_fetcher import fetch_candles
 from app.services.ta_engine import compute_indicators
 from app.core.auth import get_current_user_optional
 import logging
