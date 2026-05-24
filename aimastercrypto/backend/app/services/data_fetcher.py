@@ -332,8 +332,9 @@ async def get_crypto_news(currencies: Optional[str] = None) -> list:
 
     c = get_http_client()
     try:
+        api_key = settings.NEWSDATA_API_KEY or "pub_a8a6b45669e248b7802c5894974d98b1"
         params: dict = {
-            "apikey": settings.NEWSDATA_API_KEY,
+            "apikey": api_key,
             "q": currencies if currencies else "crypto bitcoin ethereum",
             "language": "pt,en",
             "category": "business,technology",
