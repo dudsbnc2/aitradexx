@@ -660,7 +660,47 @@ export default function Home() {
   ]
 
   const topCoins = [...(coins || [])].sort((a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h)
-  const filteredNews = news.filter(n => newsFilter === 'all' ? true : n.sentiment === newsFilter)
+  const filteredNews = news.filter((item) => {
+  if (newsFilter === 'all') return true
+
+  const text = (
+    (item.title || '') +
+    ' ' +
+    (item.description || '')
+  ).toLowerCase()
+
+  const positiveWords = [
+    'bull',
+    'surge',
+    'pump',
+    'rise',
+    'gain',
+    'growth',
+    'breakout',
+    'rebound',
+    'up'
+  ]
+
+  const negativeWords = [
+    'crash',
+    'dump',
+    'fall',
+    'bear',
+    'loss',
+    'fear',
+    'collapse',
+    'selloff',
+    'down'
+  ]
+
+  const isPositive = positiveWords.some(word => text.includes(word))
+  const isNegative = negativeWords.some(word => text.includes(word))
+
+  if (newsFilter === 'positive') return isPositive
+  if (newsFilter === 'negative') return isNegative
+
+  return true
+})
 
   // TradingView interval mapping (support seconds)
   const tvInterval = selectedTf === '1m' ? '1S' : selectedTf === '5m' ? '5' : selectedTf === '15m' ? '15' : selectedTf === '1H' ? '60' : selectedTf === '4H' ? '240' : 'D'
