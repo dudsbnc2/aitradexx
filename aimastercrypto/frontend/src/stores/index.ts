@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 interface Price {
   [pair: string]: number
@@ -12,7 +13,6 @@ interface MarketState {
   coins: any[]
   dexTrending: any[]
   news: any[]
-  // Actions
   setPrices: (prices: Price) => void
   updatePrice: (pair: string, price: number) => void
   setFearGreed: (fg: any) => void
@@ -94,7 +94,7 @@ export const useSignalStore = create<SignalState>((set) => ({
 }))
 
 
-// UI / preferences store
+// UI / preferences store — persiste watchlist e idioma no localStorage
 interface UIState {
   theme: 'dark' | 'neon' | 'midnight'
   language: 'en' | 'pt'
@@ -109,20 +109,28 @@ interface UIState {
   removeFromWatchlist: (pair: string) => void
 }
 
-export const useUIStore = create<UIState>((set, get) => ({
-  theme: 'dark',
-  language: 'en',
-  sidebarOpen: true,
-  activeTab: 'dashboard',
-  watchlist: ['BTC/USDT', 'ETH/USDT', 'SOL/USDT'],
+export const useUIStore = create<UIState>()(
+  persist(
+    (set, get) => ({
+      theme: 'dark',
+      language: 'pt',
+      sidebarOpen: true,
+      activeTab: 'dashboard',
+      watchlist: ['BTC/USDT'],
 
-  setTheme: (t) => set({ theme: t }),
-  setLanguage: (l) => set({ language: l }),
-  setSidebarOpen: (v) => set({ sidebarOpen: v }),
-  setActiveTab: (t) => set({ activeTab: t }),
-  addToWatchlist: (pair) => {
-    const { watchlist } = get()
-    if (!watchlist.includes(pair)) set({ watchlist: [...watchlist, pair] })
-  },
-  removeFromWatchlist: (pair) => set((s) => ({ watchlist: s.watchlist.filter((p) => p !== pair) })),
-}))
+      setTheme: (t) => set({ theme: t }),
+      setLanguage: (l) => set({ language: l }),
+      setSidebarOpen: (v) => set({ sidebarOpen: v }),
+      setActiveTab: (t) => set({ activeTab: t }),
+      addToWatchlist: (pair) => {
+        const { watchlist } = get()
+        if (!watchlist.includes(pair)) set({ watchlist: [...watchlist, pair] })
+      },
+      removeFromWatchlist: (pair) => set((s) => ({ watchlist: s.watchlist.filter((p) => p !== pair) })),
+    }),
+    {
+      name: 'aimastercrypto-ui',
+      partialize: (state) => ({ watchlist: state.watchlist, language: state.language }),
+    }
+  )
+)
