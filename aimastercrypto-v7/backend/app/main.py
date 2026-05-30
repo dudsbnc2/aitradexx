@@ -153,6 +153,7 @@ app.include_router(admin_ops_router,     prefix=f"{V1}/admin",  tags=["admin"])
 app.include_router(billing_router,       prefix=V1)
 # Legacy /api prefix para compatibilidade
 app.include_router(auth.router,          prefix="/api")
+app.include_router(auth_secure_router,   prefix="/api/auth",   tags=["auth"])
 app.include_router(signals.router,       prefix="/api")
 app.include_router(market.router,        prefix="/api")
 app.include_router(admin.router,         prefix="/api")
