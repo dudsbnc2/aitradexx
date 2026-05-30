@@ -9,6 +9,7 @@ import {
   ArrowUpRight, ArrowDownRight, Minus, Brain, Waves, Eye, Filter,
   LayoutDashboard, Scan, BookOpen, Radio, PieChart, Lock, X,
   LogIn, LogOut, UserPlus, User, Plus, Newspaper, CheckCircle, History,
+  Bot, Key, Wallet, AlertTriangle, Play, Trash2, ChevronDown, ToggleLeft, ToggleRight,
 } from 'lucide-react'
 import {
   fetchMarketOverview, fetchTrending, fetchCoins, fetchFearGreed,
@@ -21,6 +22,7 @@ import enTranslations from '@/locales/en/common.json'
 import ptTranslations from '@/locales/pt/common.json'
 import QuantPanel from '@/components/QuantPanel'
 import RegimeWidget from '@/components/RegimeWidget'
+import AutoTraderTab from '@/components/AutoTraderTab'
 
 const PAIRS = [
   'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'BNB/USDT',
@@ -29,6 +31,16 @@ const PAIRS = [
   'PEPE/USDT', 'WIF/USDT', 'BONK/USDT', 'FLOKI/USDT', 'SHIB/USDT',
   'UNI/USDT', 'AAVE/USDT', 'CRV/USDT', 'JUP/USDT', 'RAY/USDT',
   'ARB/USDT', 'OP/USDT', 'STX/USDT', 'INJ/USDT', 'SEI/USDT',
+  // 🆕 Trending 2025
+  'HYPE/USDT', 'WLD/USDT', 'TIA/USDT', 'PYTH/USDT', 'JTO/USDT',
+  'POPCAT/USDT', 'MOG/USDT', 'TURBO/USDT', 'ENA/USDT', 'EIGEN/USDT',
+  'PENGU/USDT', 'VIRTUAL/USDT', 'GOAT/USDT', 'FARTCOIN/USDT', 'MEW/USDT',
+  // 🆕 AI tokens
+  'FET/USDT', 'RENDER/USDT', 'TAO/USDT', 'GRT/USDT',
+  // 🆕 DeFi yield
+  'LDO/USDT', 'RPL/USDT', 'PENDLE/USDT',
+  // 🆕 Gaming
+  'IMX/USDT', 'SAND/USDT', 'MANA/USDT',
 ]
 const ALL_PAIRS = PAIRS
 const TIMEFRAMES = ['1m', '5m', '15m', '1H', '4H', '1D']
@@ -912,6 +924,7 @@ export default function Home() {
     { id: 'history', label: 'Histórico', icon: History },
     { id: 'watchlist', label: t.nav.watchlist, icon: Star },
     { id: 'news', label: t.nav.news, icon: BookOpen },
+    { id: 'autotrader', label: 'Auto Trade', icon: Bot },
   ]
 
   const topCoins = [...(coins || [])].sort((a, b) => b.price_change_percentage_24h - a.price_change_percentage_24h)
@@ -1531,6 +1544,11 @@ export default function Home() {
           )}
 
         </AnimatePresence>
+
+          {/* ── AUTO TRADER TAB ──────────────────────────────────────── */}
+          {activeTab === 'autotrader' && (
+            <AutoTraderTab user={user} />
+          )}
       </div>
 
       {/* Footer */}
