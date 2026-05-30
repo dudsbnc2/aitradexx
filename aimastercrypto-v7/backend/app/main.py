@@ -156,11 +156,29 @@ app.include_router(ws.router)
 
 @app.get("/health")
 async def health():
+    # Each service check is isolated so a single failure can't cause a 500.
+    # The endpoint always returns 200; callers inspect the "status" field.
     try:
         r = await get_redis()
         redis_ok = bool(r)
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"Health: Redis check failed: {exc}")
         redis_ok = False
+
+    try:
+        bg_stats = task_manager.stats
+    except Exception as exc:
+        logger.warning(f"Health: task_manager.stats failed: {exc}")
+        bg_stats = {"error": str(exc)}
+
+    try:
+        ws_stats = {
+            "total_connections": ws_manager.total_connections,
+            **{k: v for k, v in ws_limiter.stats.items() if k != "total_connections"},
+        }
+    except Exception as exc:
+        logger.warning(f"Health: ws stats failed: {exc}")
+        ws_stats = {"error": str(exc)}
 
     return {
         "status": "ok",
@@ -177,11 +195,8 @@ async def health():
             "telegram": bool(settings.TELEGRAM_TOKEN),
             "stripe": bool(settings.STRIPE_SECRET_KEY),
         },
-        "background_tasks": task_manager.stats,
-        "websockets": {
-            "total_connections": ws_manager.total_connections,
-            **ws_limiter.stats,
-        },
+        "background_tasks": bg_stats,
+        "websockets": ws_stats,
     }
 
 
