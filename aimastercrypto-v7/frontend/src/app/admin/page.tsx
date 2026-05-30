@@ -154,6 +154,19 @@ export default function AdminPage() {
 
   useEffect(() => { if (!checking && tab === 'signals') loadSignals() }, [tab, checking, loadSignals])
 
+  // Carregar dados de operations quando tab muda
+  const loadOps = useCallback(async () => {
+    setOpsLoading(true)
+    try {
+      const [opsData, analyticsData] = await Promise.all([
+        adminOperations(),
+        adminSignalAnalytics(30),
+      ])
+      setOps(opsData)
+      setSignalAnalytics(analyticsData)
+    } catch { } finally { setOpsLoading(false) }
+  }, [])
+
   // Load activity
   useEffect(() => {
     if (!checking && tab === 'activity') {
@@ -199,19 +212,6 @@ export default function AdminPage() {
     { id: 'activity', label: 'Activity', icon: Activity },
     { id: 'operations', label: 'Ops V7', icon: Activity },
   ] as const
-
-  // Carregar dados de operations quando tab muda
-  const loadOps = useCallback(async () => {
-    setOpsLoading(true)
-    try {
-      const [opsData, analyticsData] = await Promise.all([
-        adminOperations(),
-        adminSignalAnalytics(30),
-      ])
-      setOps(opsData)
-      setSignalAnalytics(analyticsData)
-    } catch { } finally { setOpsLoading(false) }
-  }, [])
 
   return (
     <div className="min-h-screen" style={{ background: '#020b14' }}>
