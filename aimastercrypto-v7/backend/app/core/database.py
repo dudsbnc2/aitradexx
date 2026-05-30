@@ -68,7 +68,13 @@ async def create_tables():
         return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("DB tables created")
+        # Migration: add columns that may be missing from older deployments
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE signals ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;"
+            )
+        )
+    logger.info("DB tables ready (migrations applied)")
 
 
 # ── Models ─────────────────────────────────────────────────────────────────
