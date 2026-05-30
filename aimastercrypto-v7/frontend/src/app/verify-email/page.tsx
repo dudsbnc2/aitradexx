@@ -1,11 +1,16 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Brain, RefreshCw, CheckCircle, X, Mail } from 'lucide-react'
 import { verifyEmail, resendCode } from '@/lib/api'
 
-export default function VerifyEmailPage() {
+// ── Inner component that uses useSearchParams() ───────────────────────────
+// Next.js 14 requires this hook to be inside a <Suspense> boundary when
+// the page is statically pre-rendered. Splitting it out here is the
+// canonical fix: the outer default export wraps it with <Suspense>.
+
+function VerifyEmailContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const email = searchParams.get('email') || ''
@@ -190,5 +195,29 @@ export default function VerifyEmailPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+// ── Fallback shown during SSR / hydration ────────────────────────────────
+
+function VerifyEmailFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: '#020b14' }}>
+      <div className="flex items-center gap-3">
+        <RefreshCw size={18} className="animate-spin text-[#00d4ff]" />
+        <span className="text-sm font-mono text-[#8ba3be]">Loading...</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Default export wraps the page in Suspense ────────────────────────────
+// Required by Next.js 14 when useSearchParams() is used in a page component.
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={<VerifyEmailFallback />}>
+      <VerifyEmailContent />
+    </Suspense>
   )
 }
