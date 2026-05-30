@@ -32,7 +32,7 @@ MAX_RESEND_COUNT = 3
 
 class RegisterRequest(BaseModel):
     email: str
-    username: str
+    username: Optional[str] = None  # optional — auto-derived from email if missing
     password: str
 
     @field_validator("email")
@@ -45,7 +45,9 @@ class RegisterRequest(BaseModel):
 
     @field_validator("username")
     @classmethod
-    def validate_username(cls, v: str) -> str:
+    def validate_username(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
         v = v.strip()
         if len(v) < 3:
             raise ValueError("Username must be at least 3 characters")
@@ -115,6 +117,13 @@ _mem_users: dict = {}
 
 @router.post("/register")
 async def register(req: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    # Auto-derive username from email if not provided
+    if not req.username:
+        base = req.email.split("@")[0]
+        # sanitise: keep alphanumeric + underscore, max 20 chars
+        sanitised = _re.sub(r"[^a-zA-Z0-9_]", "_", base)[:20]
+        req.username = sanitised or "user"
+
     # ── No DB: fallback to in-memory ──────────────────────────────────────
     if db is None:
         if req.email in _mem_users:
