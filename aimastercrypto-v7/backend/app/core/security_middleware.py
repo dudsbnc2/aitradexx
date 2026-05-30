@@ -52,7 +52,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             self.headers.pop("Strict-Transport-Security", None)
 
     async def dispatch(self, request: Request, call_next):
-        response: Response = await call_next(request)
+        try:
+            response: Response = await call_next(request)
+        except Exception as exc:
+            # Prevent BaseHTTPMiddleware from swallowing unhandled exceptions
+            # silently; re-raise so Uvicorn logs the full traceback.
+            logger.exception(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
+            raise
         for header, value in self.headers.items():
             response.headers[header] = value
         # Remove server fingerprinting
