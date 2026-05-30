@@ -779,6 +779,7 @@ export default function Home() {
   const { currentSignal, setSignal, isLoadingSignal, setLoadingSignal, isScanning, setScanning, scanResults, setScanResults, selectedPair, setSelectedPair, selectedTf, setSelectedTf } = useSignalStore()
 
   const [scanTf, setScanTf] = useState('1H')
+  const [signalError, setSignalError] = useState('')
   const wsRef = useRef<WebSocket | null>(null)
 
   // Auth state
@@ -864,11 +865,15 @@ export default function Home() {
 
   const handleAnalyze = async () => {
     setLoadingSignal(true)
+    setSignalError('')
     try {
       const s = await analyzeSignal(selectedPair, selectedTf)
       setSignal(s)
       setActiveTab('signal')
-    } catch (e) {
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail || e?.message || 'Erro ao gerar sinal. Tenta novamente.'
+      setSignalError(msg)
+      setActiveTab('signal')
       console.error(e)
     } finally {
       setLoadingSignal(false)
@@ -1365,6 +1370,13 @@ export default function Home() {
                 <div className="glass-card p-8 flex flex-col items-center gap-3">
                   <div className="w-12 h-12 rounded-full border-2 border-[#00d4ff]/30 border-t-[#00d4ff] animate-spin" />
                   <div className="text-sm font-mono text-[#8ba3be]">IA analisando {selectedPair} {selectedTf}...</div>
+                </div>
+              ) : signalError ? (
+                <div className="glass-card p-8 flex flex-col items-center gap-3 border border-red-500/30">
+                  <div className="text-red-400 text-sm font-mono text-center">⚠️ {signalError}</div>
+                  <button onClick={handleAnalyze} className="text-xs font-mono px-4 py-2 rounded border border-[#00d4ff]/30 text-[#00d4ff] hover:bg-[#00d4ff]/10 transition-colors">
+                    Tentar novamente
+                  </button>
                 </div>
               ) : currentSignal ? (
                 <SignalCard signal={currentSignal} />
