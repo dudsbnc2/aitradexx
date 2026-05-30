@@ -1,20 +1,13 @@
 """
 AIMasterCrypto — FastAPI Backend v7
-Improvements over v6:
-  - task_manager com retry e observabilidade
-  - auth seguro com httpOnly cookie (auth_secure)
-  - billing Stripe (billing)
-  - admin ops dashboard (admin_ops)
-  - quant engine probabilístico
-  - signal staleness
-  - websocket throttler
 """
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -78,7 +71,6 @@ async def lifespan(app: FastAPI):
     init_engine()
     await create_tables()
 
-    # Price broadcaster com task_manager (retry automático)
     task_manager.spawn("price_broadcaster", price_broadcaster(ALL_PAIRS), retry=3)
 
     try:
@@ -114,6 +106,12 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    logger.warning(f"422 Validation error on {request.method} {request.url.path}: {errors}")
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 app.add_middleware(
     SecurityHeadersMiddleware,
