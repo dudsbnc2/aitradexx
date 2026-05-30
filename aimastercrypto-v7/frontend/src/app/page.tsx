@@ -1036,8 +1036,20 @@ export default function Home() {
                 <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0c1f35] border border-[#1a3a5c]">
                   <User size={12} className="text-[#00d4ff]" />
                   <span className="text-xs font-mono text-[#e8f4ff]">{user.username || user.email?.split('@')[0]}</span>
-                  {user.role === 'admin' && <span className="text-[9px] px-1 rounded bg-[#b366ff]/20 text-[#b366ff] font-mono">ADMIN</span>
-                  {isAdmin && <a href="/admin" className="text-[9px] px-1.5 py-0.5 rounded font-mono text-[#b366ff] hover:bg-[#b366ff]/20 transition-colors border border-[#b366ff]/30">Panel</a>}
+                  {user.role === 'admin' && (
+                    <span className="text-[9px] px-1 rounded bg-[#b366ff]/20 text-[#b366ff] font-mono">
+                      ADMIN
+                    </span>
+                  )}
+
+                  {isAdmin && (
+                    <a
+                      href="/admin"
+                      className="text-[9px] px-1.5 py-0.5 rounded font-mono text-[#b366ff] hover:bg-[#b366ff]/20 transition-colors border border-[#b366ff]/30"
+                    >
+                      Panel
+                    </a>
+                  )}
                 </div>
                 <button onClick={handleLogout}
                   className="w-8 h-8 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#ff4466] hover:border-[#ff4466]/30 transition-all"
