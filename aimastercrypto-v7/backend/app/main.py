@@ -110,7 +110,15 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     errors = exc.errors()
-    logger.warning(f"422 Validation error on {request.method} {request.url.path}: {errors}")
+    try:
+        body = await request.body()
+        body_str = body.decode("utf-8", errors="replace")[:500]
+    except Exception:
+        body_str = "<unreadable>"
+    logger.warning(
+        f"422 Validation error on {request.method} {request.url.path}: "
+        f"errors={errors} | body={body_str}"
+    )
     return JSONResponse(status_code=422, content={"detail": errors})
 
 app.add_middleware(
