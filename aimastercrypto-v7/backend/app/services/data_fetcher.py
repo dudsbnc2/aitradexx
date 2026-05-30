@@ -37,11 +37,25 @@ ALL_PAIRS = [
     "UNI/USDT", "AAVE/USDT", "CRV/USDT", "JUP/USDT", "RAY/USDT",
     # Layer 2 / infra
     "ARB/USDT", "OP/USDT", "STX/USDT", "INJ/USDT", "SEI/USDT",
+    # 🆕 Trending & high interest 2024-2025
+    "HYPE/USDT", "WLD/USDT", "TIA/USDT", "PYTH/USDT", "JTO/USDT",
+    "POPCAT/USDT", "MOG/USDT", "TURBO/USDT", "ENA/USDT", "EIGEN/USDT",
+    "PENGU/USDT", "VIRTUAL/USDT", "GOAT/USDT", "FARTCOIN/USDT", "MEW/USDT",
+    # 🆕 AI & infra tokens
+    "FET/USDT", "RENDER/USDT", "TAO/USDT", "GRT/USDT",
+    # 🆕 Real yield / liquid staking
+    "LDO/USDT", "RPL/USDT", "PENDLE/USDT",
+    # 🆕 Gaming / NFT
+    "IMX/USDT", "SAND/USDT", "MANA/USDT",
 ]
 
 # Pairs used in auto-scan — excludes tokens not on Hyperliquid that always
 # fall back to CryptoCompare and hammer the free-tier rate limit.
-_CC_ONLY_PAIRS = {"PEPE/USDT", "BONK/USDT", "FLOKI/USDT", "SHIB/USDT", "RAY/USDT", "MATIC/USDT"}
+_CC_ONLY_PAIRS = {
+    "PEPE/USDT", "BONK/USDT", "FLOKI/USDT", "SHIB/USDT", "RAY/USDT", "MATIC/USDT",
+    "MOG/USDT", "TURBO/USDT", "POPCAT/USDT", "MEW/USDT", "FARTCOIN/USDT",
+    "SAND/USDT", "MANA/USDT",
+}
 SCAN_PAIRS = [p for p in ALL_PAIRS if p not in _CC_ONLY_PAIRS]
 
 _hl_symbols: set = set()
@@ -188,6 +202,16 @@ COIN_ID_MAP = {
     "JUP": "jupiter-exchange-solana", "RAY": "raydium",
     "ARB": "arbitrum", "OP": "optimism", "STX": "blockstack",
     "INJ": "injective-protocol", "SEI": "sei-network",
+    # 🆕 New coins
+    "HYPE": "hyperliquid", "WLD": "worldcoin-wld", "TIA": "celestia",
+    "PYTH": "pyth-network", "JTO": "jito-governance-token",
+    "POPCAT": "popcat", "MOG": "mog-coin", "TURBO": "turbo",
+    "ENA": "ethena", "EIGEN": "eigenlayer", "PENGU": "pudgy-penguins",
+    "VIRTUAL": "virtual-protocol", "GOAT": "goat", "FARTCOIN": "fartcoin",
+    "MEW": "cat-in-a-dogs-world", "FET": "fetch-ai", "RENDER": "render-token",
+    "TAO": "bittensor", "GRT": "the-graph", "LDO": "lido-dao",
+    "RPL": "rocket-pool", "PENDLE": "pendle", "IMX": "immutable-x",
+    "SAND": "the-sandbox", "MANA": "decentraland",
 }
 
 
