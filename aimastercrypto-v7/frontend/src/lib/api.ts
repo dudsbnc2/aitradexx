@@ -150,15 +150,46 @@ export function createPriceWebSocket(pairs: string[], onMessage: (data: any) => 
   const WS_BASE = origin
     .replace('https://', 'wss://')
     .replace('http://', 'ws://')
-  const ws = new WebSocket(`${WS_BASE}/ws/prices?pairs=${pairs.join(',')}`)
-  ws.onmessage = (event) => {
-    try { onMessage(JSON.parse(event.data)) } catch { }
+
+  let ws: WebSocket
+  let interval: ReturnType<typeof setInterval>
+  let reconnectTimeout: ReturnType<typeof setTimeout>
+  let destroyed = false
+
+  function connect() {
+    if (destroyed) return
+    ws = new WebSocket(`${WS_BASE}/ws/prices?pairs=${pairs.join(',')}`)
+    ws.onmessage = (event) => {
+      try { onMessage(JSON.parse(event.data)) } catch { }
+    }
+    ws.onopen = () => {
+      clearTimeout(reconnectTimeout)
+      interval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping')
+      }, 30000)
+    }
+    ws.onclose = () => {
+      clearInterval(interval)
+      if (!destroyed) {
+        reconnectTimeout = setTimeout(connect, 3000)  // auto-reconnect after 3s
+      }
+    }
+    ws.onerror = () => {
+      ws.close()  // triggers onclose → reconnect
+    }
   }
-  const interval = setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) ws.send('ping')
-  }, 30000)
-  ws.onclose = () => clearInterval(interval)
-  return ws
+
+  connect()
+
+  // Return a proxy object with a .close() that prevents reconnects
+  return {
+    close: () => {
+      destroyed = true
+      clearInterval(interval)
+      clearTimeout(reconnectTimeout)
+      ws?.close()
+    },
+  } as unknown as WebSocket
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────
