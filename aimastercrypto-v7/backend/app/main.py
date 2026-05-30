@@ -109,7 +109,15 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    errors = exc.errors()
+    # Pydantic v2 can embed non-serializable objects (e.g. ValueError) in the
+    # "ctx" field of errors(). Sanitise each error to guarantee JSON safety.
+    def _safe(err: dict) -> dict:
+        out = {k: v for k, v in err.items() if k != "ctx"}
+        if "ctx" in err:
+            out["ctx"] = {k: str(v) for k, v in err["ctx"].items()}
+        return out
+
+    errors = [_safe(e) for e in exc.errors()]
     try:
         body = await request.body()
         body_str = body.decode("utf-8", errors="replace")[:500]
