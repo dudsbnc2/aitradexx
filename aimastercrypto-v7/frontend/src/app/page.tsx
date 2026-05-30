@@ -78,15 +78,16 @@ function BiasBadge({ bias }: { bias: string }) {
   )
 }
 
-function ConfidenceBar({ value }: { value: number }) {
-  const color = value >= 75 ? '#00ff88' : value >= 60 ? '#00d4ff' : value >= 45 ? '#ffcc00' : '#ff4466'
+function ConfidenceBar({ value }: { value: number | undefined }) {
+  const v = value ?? 0
+  const color = v >= 75 ? '#00ff88' : v >= 60 ? '#00d4ff' : v >= 45 ? '#ffcc00' : '#ff4466'
   return (
     <div className="w-full h-1.5 bg-[#1a3a5c] rounded-full overflow-hidden">
       <motion.div
         className="h-full rounded-full"
         style={{ backgroundColor: color }}
         initial={{ width: 0 }}
-        animate={{ width: `${value}%` }}
+        animate={{ width: `${v}%` }}
         transition={{ duration: 0.8, ease: 'easeOut' }}
       />
     </div>
@@ -163,8 +164,8 @@ function SignalCard({ signal }: { signal: any }) {
           <BiasBadge bias={bias} />
           <div>
             <div className="text-xs font-mono text-[#8ba3be]">Confiança</div>
-            <div className="text-sm font-bold font-mono" style={{ color: confidence >= 75 ? '#00ff88' : confidence >= 60 ? '#00d4ff' : '#ffcc00' }}>
-              {confidence}%
+            <div className="text-sm font-bold font-mono" style={{ color: (confidence ?? 0) >= 75 ? '#00ff88' : (confidence ?? 0) >= 60 ? '#00d4ff' : '#ffcc00' }}>
+              {confidence ?? '—'}%
             </div>
           </div>
         </div>
