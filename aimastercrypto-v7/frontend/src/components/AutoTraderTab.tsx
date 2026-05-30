@@ -75,9 +75,11 @@ const RISK_PROFILES = [
   { id: 'aggressive', label: 'Agressivo', desc: 'TP maior, aceita mais volatilidade', color: '#ff9900' },
 ]
 
-function authHeaders() {
+function authHeaders(): Record<string, string> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
-  return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
+  const h: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) h['Authorization'] = `Bearer ${token}`
+  return h
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
