@@ -198,7 +198,7 @@ Respond in 2-3 concise sentences. Be specific about conditions. No intro phrases
                 json={"model": "llama-3.3-70b-versatile", "max_tokens": 200, "temperature": 0.3,
                       "messages": [{"role": "user", "content": prompt}]},
             )
-            r.raise_for_status()
+            r.raise_for_status()  # inside try — 401/429 falls through to return below
             return r.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
         logger.warning(f"Market summary AI: {e}")
