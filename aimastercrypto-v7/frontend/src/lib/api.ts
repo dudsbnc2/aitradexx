@@ -151,64 +151,81 @@ export function createPriceWebSocket(pairs: string[], onMessage: (data: any) => 
     .replace('https://', 'wss://')
     .replace('http://', 'ws://')
 
-  let ws: WebSocket
-  let interval: ReturnType<typeof setInterval>
-  let reconnectTimeout: ReturnType<typeof setTimeout>
+  let ws: WebSocket | null = null
+  let pingInterval: ReturnType<typeof setInterval> | null = null
+  let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
   let destroyed = false
+
+  function cleanup() {
+    if (pingInterval) { clearInterval(pingInterval); pingInterval = null }
+    if (reconnectTimeout) { clearTimeout(reconnectTimeout); reconnectTimeout = null }
+    if (ws) {
+      // Remove all listeners before closing to prevent MaxListenersExceededWarning
+      ws.onopen = null
+      ws.onmessage = null
+      ws.onclose = null
+      ws.onerror = null
+      ws = null
+    }
+  }
 
   function connect() {
     if (destroyed) return
-    ws = new WebSocket(`${WS_BASE}/ws/prices?pairs=${pairs.join(',')}`)
-    ws.onmessage = (event) => {
+    cleanup()  // always clean previous instance before creating new one
+
+    const socket = new WebSocket(`${WS_BASE}/ws/prices?pairs=${pairs.join(',')}`)
+
+    socket.onmessage = (event) => {
       try { onMessage(JSON.parse(event.data)) } catch { }
     }
-    ws.onopen = () => {
-      clearTimeout(reconnectTimeout)
-      interval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.send('ping')
+
+    socket.onopen = () => {
+      pingInterval = setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) socket.send('ping')
       }, 30000)
     }
-    ws.onclose = () => {
-      clearInterval(interval)
+
+    socket.onclose = () => {
+      if (pingInterval) { clearInterval(pingInterval); pingInterval = null }
       if (!destroyed) {
-        reconnectTimeout = setTimeout(connect, 3000)  // auto-reconnect after 3s
+        reconnectTimeout = setTimeout(connect, 3000)
       }
     }
-    ws.onerror = () => {
-      ws.close()  // triggers onclose → reconnect
+
+    socket.onerror = () => {
+      socket.close()  // triggers onclose → reconnect
     }
+
+    ws = socket
   }
 
   connect()
 
-  // Return a proxy object with a .close() that prevents reconnects
   return {
     close: () => {
       destroyed = true
-      clearInterval(interval)
-      clearTimeout(reconnectTimeout)
-      ws?.close()
+      cleanup()
     },
   } as unknown as WebSocket
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────
 
-export function fmtPrice(n: number): string {
-  if (!n) return '—'
+export function fmtPrice(n: number | undefined | null): string {
+  if (n === undefined || n === null || isNaN(n as number) || n === 0) return '—'
   if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   if (n >= 1) return n.toFixed(4)
   return n.toFixed(8)
 }
 
-export function fmtPct(n: number): string {
-  if (n === undefined || n === null) return '—'
+export function fmtPct(n: number | undefined | null): string {
+  if (n === undefined || n === null || isNaN(n as number)) return '—'
   const sign = n >= 0 ? '+' : ''
   return `${sign}${n.toFixed(2)}%`
 }
 
-export function fmtLargeNum(n: number): string {
-  if (!n) return '—'
+export function fmtLargeNum(n: number | undefined | null): string {
+  if (!n || isNaN(n as number)) return '—'
   if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`
   if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`
   if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`
