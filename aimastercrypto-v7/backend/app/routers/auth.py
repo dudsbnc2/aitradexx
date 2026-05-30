@@ -1,6 +1,7 @@
 """
 Auth router — PostgreSQL-backed with email OTP verification.
 """
+import json
 import secrets
 import hashlib
 from datetime import datetime, timedelta, timezone
@@ -49,6 +50,8 @@ class RegisterRequest(BaseModel):
         if v is None:
             return v
         v = v.strip()
+        if not v:  # empty string after strip → treat as absent
+            return None
         if len(v) < 3:
             raise ValueError("Username must be at least 3 characters")
         if len(v) > 30:
@@ -114,6 +117,26 @@ _mem_users: dict = {}
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────
+
+@router.post("/register-debug")
+async def register_debug(request: Request):
+    """Temporary debug endpoint — remove after diagnosing 422. Returns raw body."""
+    try:
+        body_bytes = await request.body()
+        body_text = body_bytes.decode("utf-8", errors="replace")
+        try:
+            body_json = json.loads(body_text)
+        except Exception:
+            body_json = None
+        return {
+            "raw_body": body_text,
+            "parsed": body_json,
+            "content_type": request.headers.get("content-type"),
+            "fields_present": list(body_json.keys()) if body_json else [],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 
 @router.post("/register")
 async def register(req: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
