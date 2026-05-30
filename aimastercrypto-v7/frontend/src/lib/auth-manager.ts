@@ -113,7 +113,12 @@ async function _doRefresh(): Promise<string | null> {
   _isRefreshing = true
 
   try {
-    const res = await fetch('/api/v1/auth/refresh-cookie', {
+    // Use absolute URL to backend — relative path would hit the Next.js server (404)
+    const apiBase = typeof window !== 'undefined'
+      ? (process.env.NEXT_PUBLIC_API_URL || window.location.origin)
+      : (process.env.NEXT_PUBLIC_API_URL || 'http://backend:8000')
+
+    const res = await fetch(`${apiBase}/api/v1/auth/refresh-cookie`, {
       method: 'POST',
       credentials: 'include', // envia o httpOnly cookie automaticamente
       headers: { 'Content-Type': 'application/json' },
