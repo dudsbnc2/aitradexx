@@ -19,14 +19,12 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [checking, setChecking] = useState(true)
 
-  // V7: verificar via auth-manager em vez de localStorage
   useEffect(() => {
     import('@/lib/auth-manager').then(({ getAccessToken, initAuth }) => {
       const token = getAccessToken()
       if (token) {
         getMe().then(() => router.replace(redirect)).catch(() => setChecking(false))
       } else {
-        // Tentar renovar via httpOnly cookie
         initAuth().then((renewed) => {
           if (renewed) {
             getMe().then(() => router.replace(redirect)).catch(() => setChecking(false))
@@ -37,6 +35,22 @@ export default function LoginPage() {
       }
     })
   }, [redirect, router])
+
+  const parseError = (e: any): string => {
+    const detail = e?.response?.data?.detail
+    if (!detail) return 'Authentication failed. Check your credentials.'
+    // Pydantic v2 retorna array de objetos: [{type, loc, msg, input, ctx}]
+    if (Array.isArray(detail)) {
+      return detail.map((d: any) => {
+        const field = d.loc ? d.loc[d.loc.length - 1] : ''
+        const msg = d.msg || 'Invalid value'
+        return field ? `${field}: ${msg}` : msg
+      }).join(' · ')
+    }
+    // String simples
+    if (typeof detail === 'string') return detail
+    return 'Authentication failed. Check your credentials.'
+  }
 
   const handleSubmit = async () => {
     if (!email || !password) { setError('Fill in all fields'); return }
@@ -57,7 +71,7 @@ export default function LoginPage() {
       }
       router.replace(redirect)
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Authentication failed. Check your credentials.')
+      setError(parseError(e))
     } finally {
       setLoading(false)
     }
@@ -160,7 +174,7 @@ export default function LoginPage() {
               <div className="flex items-start gap-2 text-xs text-[#ff4466] font-mono rounded-lg p-3"
                 style={{ background: '#ff446610', border: '1px solid #ff446620' }}>
                 <X size={12} className="mt-0.5 shrink-0" />
-                {error}
+                <span>{error}</span>
               </div>
             )}
 
