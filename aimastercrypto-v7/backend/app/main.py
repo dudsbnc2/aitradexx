@@ -23,7 +23,7 @@ from app.routers.auth_secure import router as auth_secure_router
 from app.routers.billing import router as billing_router
 from app.websockets.manager import ws_manager, price_broadcaster
 from app.services.signal_service import run_scan
-from app.services.data_fetcher import ALL_PAIRS
+from app.services.data_fetcher import ALL_PAIRS, SCAN_PAIRS
 
 # ── Logging ───────────────────────────────────────────────────────────────
 setup_logging(
@@ -42,7 +42,7 @@ async def _auto_scan_job():
     async def _job():
         logger.info(f"Auto-scan {settings.AUTO_SCAN_TF}")
         try:
-            result = await run_scan(ALL_PAIRS, settings.AUTO_SCAN_TF, use_mtf=True)
+            result = await run_scan(SCAN_PAIRS, settings.AUTO_SCAN_TF, use_mtf=True)
             if result.get("actionable", 0) > 0:
                 await ws_manager.broadcast(
                     {"type": "scan_result", "data": result},
