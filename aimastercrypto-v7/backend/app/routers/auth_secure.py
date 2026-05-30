@@ -69,7 +69,7 @@ def _user_dict(user) -> dict:
 
 COOKIE_NAME = "aic_refresh"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30   # 30 dias
-COOKIE_PATH = "/api/v1/auth"          # scope mínimo — só acessível neste path
+COOKIE_PATH = "/"                      # path raiz — browser envia em todos os pedidos ao domínio
 
 
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
@@ -78,8 +78,8 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
         key=COOKIE_NAME,
         value=refresh_token,
         httponly=True,           # JS não consegue ler — protege contra XSS
-        secure=True,             # HTTPS only (em dev pode desligar)
-        samesite="strict",       # CSRF protection
+        secure=True,             # HTTPS only
+        samesite="lax",          # lax em vez de strict — necessário para Railway cross-service
         max_age=COOKIE_MAX_AGE,
         path=COOKIE_PATH,
     )
@@ -90,6 +90,8 @@ def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(
         key=COOKIE_NAME,
         path=COOKIE_PATH,
+        samesite="lax",
+        secure=True,
     )
 
 
