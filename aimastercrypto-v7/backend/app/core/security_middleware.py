@@ -61,9 +61,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             raise
         for header, value in self.headers.items():
             response.headers[header] = value
-        # Remove server fingerprinting
-        response.headers.pop("server", None)
-        response.headers.pop("x-powered-by", None)
+        # Remove server fingerprinting (MutableHeaders has no .pop(); use del with guard)
+        for h in ("server", "x-powered-by"):
+            if h in response.headers:
+                del response.headers[h]
         return response
 
 
