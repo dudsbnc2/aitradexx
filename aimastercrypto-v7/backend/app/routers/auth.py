@@ -42,6 +42,12 @@ class RegisterRequest(BaseModel):
         v = v.strip().lower()
         if not _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v):
             raise ValueError("Invalid email address")
+        # Block disposable/fake domains
+        domain = v.split("@")[-1]
+        _blocked = {"mailinator.com", "trashmail.com", "guerrillamail.com",
+                    "tempmail.com", "throwam.com", "yopmail.com", "sharklasers.com"}
+        if domain in _blocked:
+            raise ValueError("Disposable email addresses are not allowed")
         return v
 
     @field_validator("username")
@@ -179,33 +185,18 @@ async def register(req: RegisterRequest, request: Request, db: AsyncSession = De
         raise HTTPException(400, "Username already taken")
 
     role = "admin" if req.email.lower() in get_admin_emails() else "free"
-    # Admin accounts are auto-verified
-    auto_verified = role in ("admin", "superadmin")
 
     user = User(
         email=req.email,
         username=req.username,
         hashed_password=hash_password(req.password),
         role=role,
-        email_verified=auto_verified,
-        email_verified_at=datetime.now(timezone.utc) if auto_verified else None,
+        email_verified=True,
+        email_verified_at=datetime.now(timezone.utc),
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
-
-    email_sent = False
-    if not auto_verified:
-        # Create OTP
-        code = _generate_otp()
-        ev = EmailVerification(
-            user_id=user.id,
-            code_hash=_hash_code(code),
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRE_MINUTES),
-        )
-        db.add(ev)
-        await db.commit()
-        email_sent = await send_verification_email(user.email, user.username, code)
 
     access, refresh = _make_token(user)
     return {
@@ -213,8 +204,8 @@ async def register(req: RegisterRequest, request: Request, db: AsyncSession = De
         "refresh_token": refresh,
         "token_type": "bearer",
         "user": _user_dict(user),
-        "email_sent": email_sent,
-        "requires_verification": not auto_verified,
+        "email_sent": False,
+        "requires_verification": False,
     }
 
 
