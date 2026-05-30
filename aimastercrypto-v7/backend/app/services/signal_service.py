@@ -9,11 +9,14 @@ from decimal import Decimal
 from typing import Optional
 
 from app.core.config import settings
-from app.services.data_fetcher import fetch_candles, get_current_price, ALL_PAIRS
+from app.services.data_fetcher import fetch_candles, get_current_price, ALL_PAIRS, SCAN_PAIRS
 from app.services.ta_engine import compute_indicators, rule_engine, backtest_rule_engine
 from app.services.ai_service import get_ai_signal
 
 logger = logging.getLogger("tradeia.signals")
+
+# Semaphore to limit concurrent AI calls during scan (avoids 429 rate limits)
+_SCAN_SEMAPHORE = asyncio.Semaphore(5)
 
 # How many candles to look ahead when checking outcome (per timeframe)
 OUTCOME_LOOKAHEAD_CANDLES = {
@@ -462,17 +465,18 @@ async def run_signal(pair: str, timeframe: str, use_mtf: bool = True, use_ai: bo
 
 
 async def run_scan(pairs: Optional[list] = None, timeframe: str = "1H", use_mtf: bool = True) -> dict:
-    pairs = pairs or ALL_PAIRS
+    pairs = pairs or SCAN_PAIRS
 
     async def _safe_signal(p: str):
-        try:
-            s = await run_signal(p, timeframe, use_mtf=use_mtf)
-            s["scanned_pair"] = p
-            s["pair"] = p  # ensure pair is always set
-            return s
-        except Exception as e:
-            logger.warning(f"Scan {p}: {e}")
-            return {"scanned_pair": p, "pair": p, "error": str(e), "bias": "WAIT", "confidence": 0}
+        async with _SCAN_SEMAPHORE:  # max 5 concurrent AI calls — prevents 429
+            try:
+                s = await run_signal(p, timeframe, use_mtf=use_mtf)
+                s["scanned_pair"] = p
+                s["pair"] = p  # ensure pair is always set
+                return s
+            except Exception as e:
+                logger.warning(f"Scan {p}: {e}")
+                return {"scanned_pair": p, "pair": p, "error": str(e), "bias": "WAIT", "confidence": 0}
 
     results = await asyncio.gather(*[_safe_signal(p) for p in pairs])
     actionable = sorted(
