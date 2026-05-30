@@ -39,16 +39,26 @@ ALL_PAIRS = [
     "ARB/USDT", "OP/USDT", "STX/USDT", "INJ/USDT", "SEI/USDT",
 ]
 
+# Pairs used in auto-scan — excludes tokens not on Hyperliquid that always
+# fall back to CryptoCompare and hammer the free-tier rate limit.
+_CC_ONLY_PAIRS = {"PEPE/USDT", "BONK/USDT", "FLOKI/USDT", "SHIB/USDT", "RAY/USDT", "MATIC/USDT"}
+SCAN_PAIRS = [p for p in ALL_PAIRS if p not in _CC_ONLY_PAIRS]
+
 _hl_symbols: set = set()
 _hl_symbols_ts: float = 0.0
 
+
+HL_SYMBOL_ALIASES = {
+    "MATIC": "POL",   # rebranded on Hyperliquid
+}
 
 def _hl_symbol(pair: str) -> str:
     s = pair.replace("-", "/").split("/")[0].upper()
     for suf in ("-PERP", "PERP", "-USD", "/USD", "-USDT", "/USDT", "USDT"):
         if s.endswith(suf):
             s = s[: -len(suf)]
-    return s.strip()
+    s = s.strip()
+    return HL_SYMBOL_ALIASES.get(s, s)
 
 
 async def _hl_post(payload: dict) -> dict:
@@ -134,6 +144,8 @@ async def fetch_candles(pair: str, tf: str, limit: int = 150) -> list:
     except Exception as e_hl:
         logger.warning(f"HL failed {pair}/{tf}: {e_hl} → CryptoCompare")
         candles = await fetch_candles_cryptocompare(pair, tf, limit)
+        await cache_set(cache_key, candles, ttl=120)  # longer TTL for CC to avoid rate limits
+        return candles
     await cache_set(cache_key, candles, ttl=30)
     return candles
 
@@ -142,6 +154,8 @@ async def get_current_price(pair: str) -> float:
     coin = _hl_symbol(pair)
     try:
         data = await _hl_post({"type": "l2Book", "coin": coin})
+        if data is None:
+            raise ValueError("Empty response from Hyperliquid")
         levels = data.get("levels", [])
         if len(levels) >= 2:
             bids, asks = levels[0], levels[1]
