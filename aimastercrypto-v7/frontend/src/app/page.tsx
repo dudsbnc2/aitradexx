@@ -510,9 +510,9 @@ function HistoryPanel() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
               { label: 'Sinais Fechados', value: stats.total, color: '#00d4ff' },
-              { label: 'Win Rate', value: `${stats.win_rate}%`, color: stats.win_rate >= 50 ? '#00ff88' : '#ff4466' },
-              { label: 'Avg PnL', value: `${stats.avg_pnl > 0 ? '+' : ''}${stats.avg_pnl}%`, color: stats.avg_pnl >= 0 ? '#00ff88' : '#ff4466' },
-              { label: 'W / L', value: `${stats.wins} / ${stats.losses}`, color: '#b366ff' },
+              { label: 'Taxa de Acerto', value: `${stats.win_rate}%`, color: stats.win_rate >= 50 ? '#00ff88' : '#ff4466' },
+              { label: 'PnL Médio', value: `${stats.avg_pnl > 0 ? '+' : ''}${stats.avg_pnl}%`, color: stats.avg_pnl >= 0 ? '#00ff88' : '#ff4466' },
+              { label: 'G / P', value: `${stats.wins} / ${stats.losses}`, color: '#b366ff' },
             ].map(({ label, value, color }) => (
               <div key={label} className="glass-card p-3 text-center">
                 <div className="text-[9px] font-mono uppercase tracking-wider text-[#3d5a73] mb-1">{label}</div>
@@ -580,7 +580,7 @@ function HistoryPanel() {
               {/* Result */}
               <div className="min-w-[60px] text-right">
                 <div className="text-xs font-bold font-mono" style={{ color: resultColor(sig.result) }}>
-                  {sig.result}
+                  {sig.result === 'WIN' ? 'GANHO' : sig.result === 'LOSS' ? 'PERDA' : sig.result === 'OPEN' ? 'ABERTO' : sig.result}
                 </div>
                 {sig.pnl_pct !== null && sig.pnl_pct !== undefined && (
                   <div className="text-[9px] font-mono" style={{ color: sig.pnl_pct >= 0 ? '#00ff88' : '#ff4466' }}>
@@ -1104,9 +1104,9 @@ export default function Home() {
               {/* Market metrics */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 <MetricCard label={t.dashboard.market_cap} value={fmtLargeNum(overview?.total_market_cap_usd)}
-                  sub="Total crypto market" icon={PieChart} color="#00d4ff" change={overview?.market_cap_change_24h} />
+                  sub="Mercado cripto total" icon={PieChart} color="#00d4ff" change={overview?.market_cap_change_24h} />
                 <MetricCard label={t.dashboard.volume_24h} value={fmtLargeNum(overview?.total_volume_24h)}
-                  sub="24h trading volume" icon={Activity} color="#b366ff" />
+                  sub="Volume negociação 24h" icon={Activity} color="#b366ff" />
                 <MetricCard label={t.dashboard.btc_dominance} value={`${overview?.btc_dominance || 0}%`}
                   sub={`ETH: ${overview?.eth_dominance || 0}%`} icon={Shield} color="#ffcc00" />
                 <MetricCard label="Active Crypto" value={(overview?.active_cryptocurrencies || 0).toLocaleString()}
@@ -1141,7 +1141,7 @@ export default function Home() {
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="border-b border-[#071524]">
-                          {['#', 'Asset', 'Price', '24h', '7d', 'Cap'].map((h) => (
+                          {['#', 'Ativo', 'Preço', '24h', '7d', 'Cap.'].map((h) => (
                             <th key={h} className="text-left p-3 font-mono text-[#3d5a73] font-medium">{h}</th>
                           ))}
                         </tr>
@@ -1202,7 +1202,7 @@ export default function Home() {
                   <div className="glass-card p-4">
                     <div className="flex items-center gap-2 mb-3">
                       <Zap size={14} className="text-[#00d4ff]" />
-                      <span className="text-sm font-bold">Quick Analyze</span>
+                      <span className="text-sm font-bold">Análise Rápida</span>
                     </div>
                     <select value={selectedPair} onChange={(e) => setSelectedPair(e.target.value)}
                       className="w-full bg-[#020b14] border border-[#1a3a5c] rounded-lg px-3 py-2 text-sm font-mono text-[#e8f4ff] mb-2 focus:border-[#00d4ff] outline-none">
