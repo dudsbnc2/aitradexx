@@ -71,7 +71,7 @@ class AutoTradeConfig(Base):
     user_id          = Column(Integer, ForeignKey("users.id"), nullable=False)
     exchange_key_id  = Column(Integer, ForeignKey("exchange_keys.id"), nullable=False)
     trade_mode       = Column(String(10), default="spot")   # spot | futures
-    pair             = Column(String(20), nullable=False)
+    pair             = Column(String(20), nullable=True)  # NULL = modo automático (AI escolhe)
     timeframe        = Column(String(5), default="1H")
     order_size_usdt  = Column(Numeric(12, 2), default=10)
     leverage         = Column(Integer, default=1)           # sempre 1 para spot
@@ -163,7 +163,7 @@ class ConnectKeyRequest(BaseModel):
 class TradeConfigRequest(BaseModel):
     exchange_key_id: int
     trade_mode:      Literal["spot", "futures"] = "spot"
-    pair:            str
+    pair:            Optional[str] = None  # None = modo automático (AI escolhe o melhor par)
     timeframe:       str = "1H"
     order_size_usdt: float = Field(default=10, ge=1, le=100000)
     leverage:        int   = Field(default=1, ge=1, le=125)
@@ -370,21 +370,66 @@ async def _mexc_request(
     params: dict | None = None,
     body: dict | None = None,
 ) -> dict:
+    """MEXC V3 Spot REST — assina params + body fields juntos."""
     url = f"{MEXC_BASE}{endpoint}"
     ts  = str(int(time.time() * 1000))
     p   = dict(params or {})
+    # MEXC V3: para POST, os campos do body entram no query-string para efeitos de assinatura
+    if body:
+        p.update(body)
     p["timestamp"]  = ts
     p["signature"]  = _mexc_sign(api_secret, p)
     headers = {"X-MEXC-APIKEY": api_key, "Content-Type": "application/json"}
 
     async with httpx.AsyncClient(timeout=10) as client:
-        resp = (await client.get(url, params=p, headers=headers)
-                if method.upper() == "GET"
-                else await client.post(url, params=p, json=body or {}, headers=headers))
+        if method.upper() == "GET":
+            resp = await client.get(url, params=p, headers=headers)
+        else:
+            # Enviar como query params (com assinatura) e body vazio — MEXC V3 aceita ambos
+            resp = await client.post(url, params=p, headers=headers)
 
     data = resp.json()
     if isinstance(data, dict) and data.get("code") not in (None, 0, 200):
         raise HTTPException(400, f"MEXC: {data.get('msg', data.get('message', 'Unknown error'))}")
+    return data
+
+
+MEXC_FUTURES_BASE = "https://contract.mexc.com"
+
+
+def _mexc_futures_sign(api_key: str, api_secret: str, ts: str, body_str: str) -> str:
+    """MEXC Futures: HMAC-SHA256(apiKey + timestamp + body_json)"""
+    msg = api_key + ts + body_str
+    return hmaclib.new(api_secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
+
+
+async def _mexc_futures_request(
+    method: str, endpoint: str,
+    api_key: str, api_secret: str,
+    params: dict | None = None,
+    body: dict | None = None,
+) -> dict:
+    """MEXC Futures REST (contract.mexc.com) com autenticação correcta."""
+    url = f"{MEXC_FUTURES_BASE}{endpoint}"
+    ts  = str(int(time.time() * 1000))
+    body_str = json.dumps(body, separators=(",", ":")) if body else ""
+    sig = _mexc_futures_sign(api_key, api_secret, ts, body_str)
+    headers = {
+        "ApiKey":       api_key,
+        "Request-Time": ts,
+        "Signature":    sig,
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        if method.upper() == "GET":
+            resp = await client.get(url, params=params or {}, headers=headers)
+        else:
+            resp = await client.post(url, params=params or {}, content=body_str, headers=headers)
+
+    data = resp.json()
+    if isinstance(data, dict) and data.get("code") not in (None, 0, 200):
+        raise HTTPException(400, f"MEXC Futuros: {data.get('message', data.get('msg', 'Unknown error'))}")
     return data
 
 
@@ -403,6 +448,40 @@ async def _mexc_get_balance(api_key: str, api_secret: str) -> list:
     return coins
 
 
+
+
+def _format_mexc_quantity(quantity: float, step_size: str = "0.00001") -> float:
+    """Formata a quantidade conforme o stepSize do par MEXC para evitar erros de precisão."""
+    try:
+        step = float(step_size)
+        if step <= 0:
+            return round(quantity, 6)
+        decimal_places = len(step_size.rstrip("0").split(".")[1]) if "." in step_size else 0
+        formatted = round(round(quantity / step) * step, decimal_places)
+        return formatted
+    except Exception:
+        return round(quantity, 6)
+
+
+async def _mexc_get_step_size(pair: str, api_key: str) -> str:
+    """Obtém o stepSize do par da MEXC (cache simples em memória)."""
+    symbol = pair.replace("/", "")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                f"{MEXC_BASE}/api/v3/exchangeInfo",
+                params={"symbol": symbol},
+                headers={"X-MEXC-APIKEY": api_key},
+            )
+        data = r.json()
+        for sym in data.get("symbols", []):
+            for f in sym.get("filters", []):
+                if f.get("filterType") == "LOT_SIZE":
+                    return f.get("stepSize", "0.00001")
+    except Exception:
+        pass
+    return "0.00001"  # fallback conservador
+
 async def _mexc_execute_spot(
     api_key: str, api_secret: str,
     pair: str, side: str, order_type: str,
@@ -415,8 +494,9 @@ async def _mexc_execute_spot(
     price_data = r.json()
     if "price" not in price_data:
         raise HTTPException(400, f"Par {pair} não encontrado na MEXC")
-    price = float(price_data["price"])
-    qty   = round(order_size_usdt / price, 6)
+    price    = float(price_data["price"])
+    step     = await _mexc_get_step_size(pair, api_key)
+    qty      = _format_mexc_quantity(order_size_usdt / price, step)
 
     body: dict = {
         "symbol":   symbol,
@@ -450,7 +530,7 @@ async def _mexc_execute_futures(
         symbol = symbol.rstrip("USDT") + "_USDT"
 
     # Definir leverage
-    await _mexc_request(
+    await _mexc_futures_request(
         "POST", "/api/v1/private/position/change_leverage",
         api_key=api_key, api_secret=api_secret,
         body={"symbol": symbol, "leverage": leverage, "openType": 1},
@@ -458,12 +538,12 @@ async def _mexc_execute_futures(
 
     # Preço atual
     async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"https://contract.mexc.com/api/v1/contract/ticker",
+        r = await client.get(f"{MEXC_FUTURES_BASE}/api/v1/contract/ticker",
                              params={"symbol": symbol})
     ticker_data = r.json()
     price = float(ticker_data.get("data", {}).get("lastPrice", 0))
     if not price:
-        raise HTTPException(400, f"Par {pair} não encontrado na MEXC Futures")
+        raise HTTPException(400, f"Par {pair} não encontrado na MEXC Futuros")
 
     qty = round((order_size_usdt * leverage) / price, 0)
 
@@ -484,8 +564,8 @@ async def _mexc_execute_futures(
     if stop_loss:
         body["stopLossPrice"]   = str(stop_loss)
 
-    resp     = await _mexc_request("POST", "/api/v1/private/order/submit",
-                                    api_key=api_key, api_secret=api_secret, body=body)
+    resp     = await _mexc_futures_request("POST", "/api/v1/private/order/submit",
+                                            api_key=api_key, api_secret=api_secret, body=body)
     order_id = str(resp.get("data", ""))
     return {"order_id": order_id, "price": price, "qty": qty}
 
@@ -568,7 +648,8 @@ async def trigger_auto_trades(
     signal_id: Optional[int] = None,
 ) -> None:
     """
-    Verifica AutoTradeConfigs com auto_execute=True para este par/timeframe.
+    Verifica AutoTradeConfigs com auto_execute=True.
+    Configs com pair=NULL entram em modo AI automático (aceita qualquer par).
     Executa a ordem se confiança >= min_confidence e open_trades < max_open_trades.
     Chamada assíncrona — erros são logados, nunca propagados.
     """
@@ -577,12 +658,14 @@ async def trigger_auto_trades(
 
     try:
         from app.core.database import AsyncSessionLocal
+        from sqlalchemy import or_
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(AutoTradeConfig, ExchangeKey)
                 .join(ExchangeKey, AutoTradeConfig.exchange_key_id == ExchangeKey.id)
                 .where(
-                    AutoTradeConfig.pair       == pair,
+                    # Corresponde se par específico OU modo automático (pair=None)
+                    or_(AutoTradeConfig.pair == pair, AutoTradeConfig.pair == None),
                     AutoTradeConfig.timeframe  == timeframe,
                     AutoTradeConfig.auto_execute == True,
                     AutoTradeConfig.is_active  == True,
