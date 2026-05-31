@@ -730,7 +730,7 @@ async def connect_exchange_key(
         raise HTTPException(400, f"Exchange não suportada. Use: {SUPPORTED_EXCHANGES}")
     await _validate_connection(req.exchange, req.api_key, req.api_secret, req.testnet)
     key_obj = ExchangeKey(
-        user_id              = user.id,
+        user_id              = user["uid"],
         exchange             = req.exchange,
         api_key              = req.api_key,
         api_secret_encrypted = _encrypt_secret(req.api_secret),
@@ -747,7 +747,7 @@ async def connect_exchange_key(
 @router.get("/keys")
 async def list_keys(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(ExchangeKey).where(ExchangeKey.user_id == user.id, ExchangeKey.is_active == True)
+        select(ExchangeKey).where(ExchangeKey.user_id == user["uid"], ExchangeKey.is_active == True)
     )
     return [{"id": k.id, "exchange": k.exchange, "label": k.label,
              "testnet": k.testnet, "api_key_preview": k.api_key[:8] + "****"}
@@ -757,7 +757,7 @@ async def list_keys(user=Depends(get_current_user), db: AsyncSession = Depends(g
 @router.delete("/keys/{key_id}")
 async def delete_key(key_id: int, user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(ExchangeKey).where(ExchangeKey.id == key_id, ExchangeKey.user_id == user.id)
+        select(ExchangeKey).where(ExchangeKey.id == key_id, ExchangeKey.user_id == user["uid"])
     )
     key = result.scalar_one_or_none()
     if not key:
@@ -770,7 +770,7 @@ async def delete_key(key_id: int, user=Depends(get_current_user), db: AsyncSessi
 @router.get("/balance/{key_id}")
 async def get_balance(key_id: int, user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(ExchangeKey).where(ExchangeKey.id == key_id, ExchangeKey.user_id == user.id)
+        select(ExchangeKey).where(ExchangeKey.id == key_id, ExchangeKey.user_id == user["uid"])
     )
     key = result.scalar_one_or_none()
     if not key:
@@ -805,14 +805,14 @@ async def save_config(
 
     # Verificar que a key pertence ao user
     result = await db.execute(
-        select(ExchangeKey).where(ExchangeKey.id == req.exchange_key_id, ExchangeKey.user_id == user.id)
+        select(ExchangeKey).where(ExchangeKey.id == req.exchange_key_id, ExchangeKey.user_id == user["uid"])
     )
     if not result.scalar_one_or_none():
         raise HTTPException(403, "Key not found")
 
     existing = await db.execute(
         select(AutoTradeConfig).where(
-            AutoTradeConfig.user_id         == user.id,
+            AutoTradeConfig.user_id         == user["uid"],
             AutoTradeConfig.pair            == req.pair,
             AutoTradeConfig.exchange_key_id == req.exchange_key_id,
             AutoTradeConfig.trade_mode      == req.trade_mode,
@@ -826,7 +826,7 @@ async def save_config(
         for f in fields:
             setattr(cfg, f, getattr(req, f))
     else:
-        cfg = AutoTradeConfig(user_id=user.id, **req.model_dump())
+        cfg = AutoTradeConfig(user_id=user["uid"], **req.model_dump())
         db.add(cfg)
 
     await db.commit()
@@ -837,7 +837,7 @@ async def save_config(
 @router.get("/config")
 async def list_configs(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(AutoTradeConfig).where(AutoTradeConfig.user_id == user.id,
+        select(AutoTradeConfig).where(AutoTradeConfig.user_id == user["uid"],
                                        AutoTradeConfig.is_active == True)
     )
     return [
@@ -868,7 +868,7 @@ async def execute_order(
 
     result = await db.execute(
         select(ExchangeKey).where(ExchangeKey.id == req.exchange_key_id,
-                                   ExchangeKey.user_id == user.id)
+                                   ExchangeKey.user_id == user["uid"])
     )
     key = result.scalar_one_or_none()
     if not key:
@@ -877,7 +877,7 @@ async def execute_order(
     # Verificar max_open_trades (se existir config para este par/modo)
     cfg_res = await db.execute(
         select(AutoTradeConfig).where(
-            AutoTradeConfig.user_id         == user.id,
+            AutoTradeConfig.user_id         == user["uid"],
             AutoTradeConfig.pair            == req.pair,
             AutoTradeConfig.exchange_key_id == req.exchange_key_id,
             AutoTradeConfig.trade_mode      == req.trade_mode,
@@ -888,7 +888,7 @@ async def execute_order(
     if cfg:
         open_res = await db.execute(
             select(func.count(TradeLog.id)).where(
-                TradeLog.user_id == user.id,
+                TradeLog.user_id == user["uid"],
                 TradeLog.pair    == req.pair,
                 TradeLog.status  == "filled",
             )
@@ -899,7 +899,7 @@ async def execute_order(
                 f"Limite de {cfg.max_open_trades} ordens abertas atingido para {req.pair}.")
 
     log = TradeLog(
-        user_id         = user.id,
+        user_id         = user["uid"],
         exchange_key_id = req.exchange_key_id,
         exchange        = key.exchange,
         trade_mode      = req.trade_mode,
@@ -941,7 +941,7 @@ async def execute_order(
 @router.get("/trades")
 async def list_trades(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(TradeLog).where(TradeLog.user_id == user.id)
+        select(TradeLog).where(TradeLog.user_id == user["uid"])
         .order_by(TradeLog.created_at.desc()).limit(100)
     )
     return [
