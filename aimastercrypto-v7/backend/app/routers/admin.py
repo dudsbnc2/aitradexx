@@ -536,3 +536,15 @@ async def update_subscription(
     )
 
     return {"message": f"User {user_id} plan updated to {plan}"}
+
+
+# ── AI Health Check ────────────────────────────────────────────────────────
+
+@router.get("/ai-health")
+async def ai_health_check(admin=Depends(require_admin)):
+    """
+    Verifica se todos os providers de IA estão a funcionar.
+    Testa Groq, OpenRouter, Gemini, Anthropic e Rule Engine.
+    """
+    from app.services.ai_service import get_ai_health
+    return await get_ai_health()
