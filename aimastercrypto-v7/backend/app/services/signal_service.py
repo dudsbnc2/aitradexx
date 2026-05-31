@@ -13,6 +13,23 @@ from app.services.data_fetcher import fetch_candles, get_current_price, ALL_PAIR
 from app.services.ta_engine import compute_indicators, rule_engine, backtest_rule_engine
 from app.services.ai_service import get_ai_signal
 
+
+async def _run_auto_execute(
+    pair: str, timeframe: str, bias: str,
+    confidence: int, take_profit: float, stop_loss: float,
+    signal_id: Optional[int],
+) -> None:
+    """Wrapper que chama trigger_auto_trades com import lazy para evitar circular import."""
+    try:
+        from app.routers.autotrader import trigger_auto_trades
+        await trigger_auto_trades(
+            pair=pair, timeframe=timeframe, bias=bias,
+            confidence=confidence, take_profit=take_profit,
+            stop_loss=stop_loss, signal_id=signal_id,
+        )
+    except Exception as e:
+        logger.warning(f"_run_auto_execute failed {pair}: {e}")
+
 logger = logging.getLogger("tradeia.signals")
 
 # Semaphore to limit concurrent AI calls during scan (avoids 429 rate limits)
@@ -458,6 +475,17 @@ async def run_signal(pair: str, timeframe: str, use_mtf: bool = True, use_ai: bo
         # ── Telegram alert ──────────────────────────────────────────────
         if quality.get("send_telegram"):
             asyncio.create_task(send_telegram_alert(signal, pair, timeframe, quality))
+
+        # ── Auto-execute: dispara ordens automáticas configuradas ────────
+        asyncio.create_task(_run_auto_execute(
+            pair       = pair,
+            timeframe  = timeframe,
+            bias       = signal["bias"],
+            confidence = signal.get("confidence", 0),
+            take_profit = float(signal.get("takeProfit") or 0),
+            stop_loss   = float(signal.get("stopLoss")   or 0),
+            signal_id   = signal.get("signal_id"),
+        ))
 
     return signal
 
