@@ -5,10 +5,13 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Bot, Key, Wallet, AlertTriangle, Play, Trash2, RefreshCw,
   ChevronDown, CheckCircle, Shield, Zap, TrendingUp, TrendingDown,
-  Settings, ToggleLeft, ToggleRight, ExternalLink, Info,
+  Settings, ToggleLeft, ToggleRight, ExternalLink, Info, BarChart2,
 } from 'lucide-react'
 
 const API = process.env.NEXT_PUBLIC_API_URL || ''
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+type TradeMode = 'spot' | 'futures'
 
 interface ExchangeKey {
   id: number; exchange: string; label: string; testnet: boolean; api_key_preview: string
@@ -16,24 +19,36 @@ interface ExchangeKey {
 interface TradeConfig {
   id: number; pair: string; timeframe: string; order_size_usdt: number; leverage: number
   risk_profile: string; tp_multiplier: number; sl_multiplier: number
-  max_open_trades: number; auto_execute: boolean; exchange_key_id: number
+  max_open_trades: number; min_confidence: number; auto_execute: boolean
+  exchange_key_id: number; trade_mode: TradeMode
 }
 interface TradeLog {
   id: number; pair: string; side: string; order_type: string; qty: number
   price: number; take_profit: number; stop_loss: number; status: string
   order_id: string; error_msg: string; created_at: string; exchange: string
+  trade_mode: TradeMode; triggered_by: string; signal_id: number | null
 }
 interface BalanceCoin { coin: string; balance: string; available: string; usd_value: string }
 
-const PAIRS = [
+// ── Constants ──────────────────────────────────────────────────────────────────
+const SPOT_PAIRS = [
   'BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT','BNB/USDT','DOGE/USDT','ADA/USDT',
   'AVAX/USDT','LINK/USDT','DOT/USDT','TON/USDT','SUI/USDT','APT/USDT','NEAR/USDT',
-  'ARB/USDT','OP/USDT','INJ/USDT','SEI/USDT','HYPE/USDT','WLD/USDT','TIA/USDT',
-  'PYTH/USDT','JTO/USDT','ENA/USDT','EIGEN/USDT','VIRTUAL/USDT','FET/USDT',
-  'RENDER/USDT','TAO/USDT','GRT/USDT','LDO/USDT','PENDLE/USDT','IMX/USDT',
-  'PEPE/USDT','WIF/USDT','BONK/USDT','POPCAT/USDT','TURBO/USDT','PENGU/USDT','GOAT/USDT',
+  'ARB/USDT','OP/USDT','INJ/USDT','SEI/USDT','PEPE/USDT','WIF/USDT','BONK/USDT',
+  'FET/USDT','RENDER/USDT','TAO/USDT','GRT/USDT','LDO/USDT','PENDLE/USDT','IMX/USDT',
 ]
-const TIMEFRAMES = ['1m','5m','15m','1H','4H','1D']
+
+const FUTURES_PAIRS = [
+  'BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT','BNB/USDT','DOGE/USDT','ADA/USDT',
+  'AVAX/USDT','LINK/USDT','DOT/USDT','SUI/USDT','APT/USDT','NEAR/USDT','ARB/USDT',
+  'OP/USDT','INJ/USDT','WLD/USDT','TIA/USDT','ENA/USDT','HYPE/USDT','EIGEN/USDT',
+  'PEPE/USDT','WIF/USDT','BONK/USDT','TON/USDT','SEI/USDT','PYTH/USDT','JTO/USDT',
+  'FET/USDT','RENDER/USDT','TAO/USDT','GRT/USDT','LDO/USDT','PENDLE/USDT',
+]
+
+const SPOT_TIMEFRAMES    = ['1m','5m','15m','30m','1H','4H','1D']
+const FUTURES_TIMEFRAMES = ['1m','3m','5m','15m','30m','1H','2H','4H','6H','12H','1D','1W']
+
 const RISK_PROFILES = [
   { id: 'conservative', label: 'Conservador', desc: 'TP pequeno, SL apertado', color: '#00ff88' },
   { id: 'balanced',     label: 'Balanceado',  desc: 'R:R equilibrado',         color: '#00d4ff' },
@@ -46,15 +61,18 @@ const EXCHANGES = [
     url: 'https://www.bybit.com/app/user/api-management',
     note: 'Cria a key com permissão Trade. Nunca actives Withdraw.',
     testnetSupported: true,
+    supportsFutures: true,
   },
   {
     id: 'mexc', name: 'MEXC', logo: '🔵',
     url: 'https://www.mexc.com/user/openapi',
-    note: 'Cria a key com permissão Trade (Spot). Nunca actives Withdraw.',
+    note: 'Cria a key com permissão Trade. Nunca actives Withdraw.',
     testnetSupported: false,
+    supportsFutures: true,
   },
 ]
 
+// ── Auth ───────────────────────────────────────────────────────────────────────
 function authHeaders(): Record<string, string> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
   const h: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -62,6 +80,7 @@ function authHeaders(): Record<string, string> {
   return h
 }
 
+// ── Small Components ───────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
     filled:    'text-[#00ff88] bg-[#00ff88]/10 border-[#00ff88]/30',
@@ -76,6 +95,31 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+function ModeBadge({ mode }: { mode: TradeMode }) {
+  return (
+    <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border ${
+      mode === 'futures'
+        ? 'text-[#ff9900] bg-[#ff9900]/10 border-[#ff9900]/30'
+        : 'text-[#00ff88] bg-[#00ff88]/10 border-[#00ff88]/30'
+    }`}>
+      {mode === 'futures' ? '⚡ FUTUROS' : '💰 SPOT'}
+    </span>
+  )
+}
+
+function TriggeredBadge({ triggeredBy }: { triggeredBy: string }) {
+  if (!triggeredBy) return null
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-mono border ${
+      triggeredBy === 'auto_signal'
+        ? 'text-[#00d4ff] bg-[#00d4ff]/10 border-[#00d4ff]/30'
+        : 'text-[#8ba3be] bg-[#1a3a5c]/50 border-[#1a3a5c]'
+    }`}>
+      {triggeredBy === 'auto_signal' ? '🤖 AUTO' : '👆 MANUAL'}
+    </span>
+  )
+}
+
 function ExchangeBadge({ exchange }: { exchange: string }) {
   const ex = EXCHANGES.find(e => e.id === exchange)
   return (
@@ -85,7 +129,10 @@ function ExchangeBadge({ exchange }: { exchange: string }) {
   )
 }
 
-function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
+function SelectField({ label, value, onChange, options }: {
+  label: string; value: string; onChange: (v: string) => void
+  options: { value: string; label: string }[]
+}) {
   return (
     <div>
       {label && <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">{label}</label>}
@@ -113,15 +160,36 @@ function InputField({ label, value, onChange, type = 'text', min, max, step, pla
   )
 }
 
+// ── Mode Selector pill ─────────────────────────────────────────────────────────
+function ModeSelector({ value, onChange }: { value: TradeMode; onChange: (m: TradeMode) => void }) {
+  return (
+    <div className="flex gap-1 p-1 rounded-xl bg-[#0c1f35] border border-[#1a3a5c]">
+      {(['spot', 'futures'] as TradeMode[]).map(m => (
+        <button key={m} onClick={() => onChange(m)}
+          className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold font-mono transition-all flex items-center justify-center gap-1.5 ${
+            value === m
+              ? m === 'futures'
+                ? 'bg-[#ff9900]/20 text-[#ff9900] border border-[#ff9900]/30'
+                : 'bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/30'
+              : 'text-[#3d5a73] hover:text-[#8ba3be]'
+          }`}>
+          {m === 'spot' ? <><span>💰</span> SPOT</> : <><span>⚡</span> FUTUROS</>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────────
 export default function AutoTraderTab({ user }: { user: any }) {
-  const [activeSection, setActiveSection] = useState<'connect'|'trade'|'history'>('connect')
+  const [activeSection, setActiveSection] = useState<'connect' | 'trade' | 'history'>('connect')
   const [keys, setKeys] = useState<ExchangeKey[]>([])
   const [configs, setConfigs] = useState<TradeConfig[]>([])
   const [trades, setTrades] = useState<TradeLog[]>([])
-  const [balance, setBalance] = useState<BalanceCoin[]|null>(null)
-  const [selectedKey, setSelectedKey] = useState<number|null>(null)
+  const [balance, setBalance] = useState<BalanceCoin[] | null>(null)
+  const [selectedKey, setSelectedKey] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
-  const [msg, setMsg] = useState<{type:'ok'|'err'; text:string}|null>(null)
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
   // Connect form
   const [selectedExchange, setSelectedExchange] = useState('bybit')
@@ -129,6 +197,10 @@ export default function AutoTraderTab({ user }: { user: any }) {
   const [apiSecret, setApiSecret] = useState('')
   const [keyLabel, setKeyLabel] = useState('Conta Principal')
   const [testnet, setTestnet] = useState(false)
+
+  // Mode toggles
+  const [cfgMode, setCfgMode] = useState<TradeMode>('spot')
+  const [execMode, setExecMode] = useState<TradeMode>('spot')
 
   // Config form
   const [cfgPair, setCfgPair] = useState('BTC/USDT')
@@ -139,20 +211,33 @@ export default function AutoTraderTab({ user }: { user: any }) {
   const [cfgTpMul, setCfgTpMul] = useState(1.0)
   const [cfgSlMul, setCfgSlMul] = useState(1.0)
   const [cfgMaxTrades, setCfgMaxTrades] = useState(3)
+  const [cfgMinConf, setCfgMinConf] = useState(70)
   const [cfgAutoExec, setCfgAutoExec] = useState(false)
 
   // Execute form
   const [execPair, setExecPair] = useState('BTC/USDT')
-  const [execSide, setExecSide] = useState<'Buy'|'Sell'>('Buy')
+  const [execSide, setExecSide] = useState<'Buy' | 'Sell'>('Buy')
   const [execSize, setExecSize] = useState(10)
-  const [execTp, setExecTp] = useState<number|''>('')
-  const [execSl, setExecSl] = useState<number|''>('')
+  const [execTp, setExecTp] = useState<number | ''>('')
+  const [execSl, setExecSl] = useState<number | ''>('')
   const [execLev, setExecLev] = useState(1)
-  const [execOrderType, setExecOrderType] = useState<'Market'|'Limit'>('Market')
-  const [execLimitPrice, setExecLimitPrice] = useState<number|''>('')
+  const [execOrderType, setExecOrderType] = useState<'Market' | 'Limit'>('Market')
+  const [execLimitPrice, setExecLimitPrice] = useState<number | ''>('')
   const [execConfirm, setExecConfirm] = useState(false)
 
-  const showMsg = (type: 'ok'|'err', text: string) => {
+  // History filter
+  const [histFilter, setHistFilter] = useState<'all' | TradeMode>('all')
+
+  // Derived
+  const cfgPairs      = cfgMode === 'futures' ? FUTURES_PAIRS : SPOT_PAIRS
+  const cfgTimeframes = cfgMode === 'futures' ? FUTURES_TIMEFRAMES : SPOT_TIMEFRAMES
+  const execPairs     = execMode === 'futures' ? FUTURES_PAIRS : SPOT_PAIRS
+
+  // Reset pair/tf when mode changes
+  useEffect(() => { setCfgPair(cfgPairs[0]); setCfgTf(cfgTimeframes[0]) }, [cfgMode])
+  useEffect(() => { setExecPair(execPairs[0]); if (execMode === 'spot') { setExecLev(1); setExecTp(''); setExecSl('') } }, [execMode])
+
+  const showMsg = (type: 'ok' | 'err', text: string) => {
     setMsg({ type, text })
     setTimeout(() => setMsg(null), 4500)
   }
@@ -209,12 +294,21 @@ export default function AutoTraderTab({ user }: { user: any }) {
     if (!selectedKey) return showMsg('err', 'Seleciona uma conta primeiro')
     setLoading(true)
     try {
-      const r = await fetch(`${API}/api/autotrader/config`, {
-        method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ exchange_key_id: selectedKey, pair: cfgPair, timeframe: cfgTf, order_size_usdt: cfgSize, leverage: cfgLeverage, risk_profile: cfgRisk, tp_multiplier: cfgTpMul, sl_multiplier: cfgSlMul, max_open_trades: cfgMaxTrades, auto_execute: cfgAutoExec }),
-      })
+      const body: any = {
+        exchange_key_id: selectedKey,
+        trade_mode: cfgMode,
+        pair: cfgPair, timeframe: cfgTf,
+        order_size_usdt: cfgSize,
+        leverage: cfgMode === 'spot' ? 1 : cfgLeverage,
+        risk_profile: cfgRisk,
+        tp_multiplier: cfgTpMul, sl_multiplier: cfgSlMul,
+        max_open_trades: cfgMaxTrades,
+        min_confidence: cfgMinConf,
+        auto_execute: cfgAutoExec,
+      }
+      const r = await fetch(`${API}/api/autotrader/config`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       if (!r.ok) throw new Error((await r.json()).detail)
-      showMsg('ok', `Config guardada para ${cfgPair}`)
+      showMsg('ok', `Config ${cfgMode.toUpperCase()} guardada para ${cfgPair}`)
       await loadConfigs()
     } catch (e: any) { showMsg('err', e.message) }
     finally { setLoading(false) }
@@ -225,14 +319,21 @@ export default function AutoTraderTab({ user }: { user: any }) {
     if (!execConfirm) return showMsg('err', 'Confirma a ordem antes de executar')
     setLoading(true); setExecConfirm(false)
     try {
-      const body: any = { exchange_key_id: selectedKey, pair: execPair, side: execSide, order_size_usdt: execSize, leverage: execLev, order_type: execOrderType }
-      if (execTp) body.take_profit = execTp
-      if (execSl) body.stop_loss = execSl
+      const body: any = {
+        exchange_key_id: selectedKey,
+        trade_mode: execMode,
+        pair: execPair, side: execSide,
+        order_size_usdt: execSize,
+        leverage: execMode === 'spot' ? 1 : execLev,
+        order_type: execOrderType,
+      }
+      if (execMode === 'futures' && execTp) body.take_profit = execTp
+      if (execMode === 'futures' && execSl) body.stop_loss = execSl
       if (execOrderType === 'Limit' && execLimitPrice) body.limit_price = execLimitPrice
       const r = await fetch(`${API}/api/autotrader/execute`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) })
       const d = await r.json()
       if (!r.ok) throw new Error(d.detail)
-      showMsg('ok', `✓ ${execSide.toUpperCase()} ${execPair} executada! ID: ${d.order_id}`)
+      showMsg('ok', `✓ ${execSide.toUpperCase()} ${execPair} [${execMode.toUpperCase()}] executada! ID: ${d.order_id}`)
       await loadTrades()
       if (selectedKey) await loadBalance(selectedKey)
     } catch (e: any) { showMsg('err', e.message) }
@@ -248,6 +349,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
   )
 
   const selectedKeyObj = keys.find(k => k.id === selectedKey)
+  const filteredTrades = histFilter === 'all' ? trades : trades.filter(t => t.trade_mode === histFilter)
 
   return (
     <div className="space-y-5 mt-1">
@@ -259,11 +361,13 @@ export default function AutoTraderTab({ user }: { user: any }) {
             <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-[#ffcc00]/10 text-[#ffcc00] border border-[#ffcc00]/30">BETA</span>
           </h1>
           <div className="text-xs font-mono text-[#3d5a73] mt-0.5">
-            Suporta <span className="text-[#ffcc00]">Bybit</span> e <span className="text-[#00d4ff]">MEXC</span> · Spot trading
+            <span className="text-[#ffcc00]">Bybit</span> · <span className="text-[#00d4ff]">MEXC</span>
+            <span className="mx-1.5 text-[#1a3a5c]">·</span>
+            <span className="text-[#00ff88]">Spot</span> e <span className="text-[#ff9900]">Futuros</span> separados
           </div>
         </div>
         <div className="flex gap-2">
-          {(['connect','trade','history'] as const).map(s => (
+          {(['connect', 'trade', 'history'] as const).map(s => (
             <button key={s} onClick={() => setActiveSection(s)}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all ${activeSection === s ? 'bg-[#00d4ff]/10 text-[#00d4ff] border border-[#00d4ff]/20' : 'text-[#8ba3be] border border-[#1a3a5c] hover:border-[#00d4ff]/20'}`}>
               {s === 'connect' ? '🔑 Contas' : s === 'trade' ? '⚡ Operar' : '📋 Histórico'}
@@ -283,7 +387,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
         )}
       </AnimatePresence>
 
-      {/* ── CONNECT ─────────────────────────────────────────────────────── */}
+      {/* ── CONNECT ──────────────────────────────────────────────────────── */}
       {activeSection === 'connect' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className="glass-card p-5 space-y-4">
@@ -292,7 +396,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
               <span className="text-sm font-bold">Conectar Exchange</span>
             </div>
 
-            {/* Exchange selector */}
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-2">Exchange</label>
               <div className="grid grid-cols-2 gap-2">
@@ -301,13 +404,15 @@ export default function AutoTraderTab({ user }: { user: any }) {
                     className={`p-3 rounded-xl border text-left transition-all ${selectedExchange === ex.id ? 'border-[#00d4ff]/40 bg-[#00d4ff]/5' : 'border-[#1a3a5c] hover:border-[#00d4ff]/20'}`}>
                     <div className="text-base mb-0.5">{ex.logo}</div>
                     <div className={`text-sm font-bold ${selectedExchange === ex.id ? 'text-[#00d4ff]' : 'text-[#e8f4ff]'}`}>{ex.name}</div>
-                    <div className="text-[10px] font-mono text-[#3d5a73]">{ex.testnetSupported ? 'Testnet disponível' : 'Apenas mainnet'}</div>
+                    <div className="text-[10px] font-mono text-[#3d5a73] mt-0.5 space-x-1">
+                      <span>{ex.testnetSupported ? 'Testnet ✓' : 'Mainnet only'}</span>
+                      {ex.supportsFutures && <span className="text-[#ff9900]">· Futuros ✓</span>}
+                    </div>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Info box */}
             <div className="flex items-start gap-2 p-3 rounded-lg bg-[#ffcc00]/5 border border-[#ffcc00]/20">
               <Info size={13} className="text-[#ffcc00] flex-shrink-0 mt-0.5" />
               <div className="text-xs text-[#ffcc00]/80 font-mono leading-relaxed">
@@ -350,27 +455,24 @@ export default function AutoTraderTab({ user }: { user: any }) {
                 <div className="text-center py-8"><Key size={32} className="text-[#1a3a5c] mx-auto mb-2" /><div className="text-xs font-mono text-[#3d5a73]">Nenhuma conta conectada</div></div>
               ) : (
                 <div className="space-y-2">
-                  {keys.map(k => {
-                    const exInfo = EXCHANGES.find(e => e.id === k.exchange)
-                    return (
-                      <div key={k.id} onClick={() => setSelectedKey(k.id)}
-                        className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedKey === k.id ? 'border-[#00d4ff]/40 bg-[#00d4ff]/5' : 'border-[#1a3a5c] hover:border-[#00d4ff]/20'}`}>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-bold">{k.label}</span>
-                            <ExchangeBadge exchange={k.exchange} />
-                            {k.testnet && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#ffcc00]/10 text-[#ffcc00] border border-[#ffcc00]/30">TESTNET</span>}
-                            {selectedKey === k.id && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#00d4ff]/10 text-[#00d4ff] border border-[#00d4ff]/30">ATIVO</span>}
-                          </div>
-                          <div className="text-xs font-mono text-[#3d5a73] mt-0.5">{k.api_key_preview}</div>
+                  {keys.map(k => (
+                    <div key={k.id} onClick={() => setSelectedKey(k.id)}
+                      className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedKey === k.id ? 'border-[#00d4ff]/40 bg-[#00d4ff]/5' : 'border-[#1a3a5c] hover:border-[#00d4ff]/20'}`}>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold">{k.label}</span>
+                          <ExchangeBadge exchange={k.exchange} />
+                          {k.testnet && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#ffcc00]/10 text-[#ffcc00] border border-[#ffcc00]/30">TESTNET</span>}
+                          {selectedKey === k.id && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#00d4ff]/10 text-[#00d4ff] border border-[#00d4ff]/30">ATIVO</span>}
                         </div>
-                        <button onClick={e => { e.stopPropagation(); deleteKey(k.id) }}
-                          className="w-7 h-7 rounded-lg bg-[#ff4466]/10 border border-[#ff4466]/20 flex items-center justify-center text-[#ff4466] hover:bg-[#ff4466]/20 transition-all flex-shrink-0">
-                          <Trash2 size={11} />
-                        </button>
+                        <div className="text-xs font-mono text-[#3d5a73] mt-0.5">{k.api_key_preview}</div>
                       </div>
-                    )
-                  })}
+                      <button onClick={e => { e.stopPropagation(); deleteKey(k.id) }}
+                        className="w-7 h-7 rounded-lg bg-[#ff4466]/10 border border-[#ff4466]/20 flex items-center justify-center text-[#ff4466] hover:bg-[#ff4466]/20 transition-all flex-shrink-0">
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -401,10 +503,11 @@ export default function AutoTraderTab({ user }: { user: any }) {
         </div>
       )}
 
-      {/* ── TRADE ───────────────────────────────────────────────────────── */}
+      {/* ── TRADE ────────────────────────────────────────────────────────── */}
       {activeSection === 'trade' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* Manual execute */}
+
+          {/* Manual Execute */}
           <div className="glass-card p-5 space-y-4">
             <div className="flex items-center gap-2">
               <Zap size={16} className="text-[#ffcc00]" />
@@ -418,8 +521,21 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             ) : (
               <>
+                {/* Mode selector */}
+                <ModeSelector value={execMode} onChange={setExecMode} />
+
+                {execMode === 'futures' && (
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-[#ff9900]/5 border border-[#ff9900]/20">
+                    <Info size={13} className="text-[#ff9900] flex-shrink-0 mt-0.5" />
+                    <div className="text-xs text-[#ff9900]/80 font-mono leading-relaxed">
+                      Modo Futuros usa <strong>perpetuals USDT-margined</strong>. Leverage e TP/SL funcionam nativamente. Garante que tens margem suficiente.
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-3">
-                  <SelectField label="Par" value={execPair} onChange={setExecPair} options={PAIRS.map(p => ({ value: p, label: p }))} />
+                  <SelectField label="Par" value={execPair} onChange={setExecPair}
+                    options={execPairs.map(p => ({ value: p, label: p }))} />
                   <SelectField label="Tipo" value={execOrderType} onChange={v => setExecOrderType(v as any)}
                     options={[{ value: 'Market', label: 'Market' }, { value: 'Limit', label: 'Limit' }]} />
                 </div>
@@ -427,7 +543,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
                 <div>
                   <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Direção</label>
                   <div className="grid grid-cols-2 gap-2">
-                    {(['Buy','Sell'] as const).map(s => (
+                    {(['Buy', 'Sell'] as const).map(s => (
                       <button key={s} onClick={() => setExecSide(s)}
                         className={`py-2.5 rounded-xl text-sm font-bold font-mono border transition-all flex items-center justify-center gap-2
                           ${execSide === s
@@ -442,27 +558,38 @@ export default function AutoTraderTab({ user }: { user: any }) {
 
                 <div className="grid grid-cols-2 gap-3">
                   <InputField label="Tamanho (USDT)" value={execSize} onChange={setExecSize} type="number" min={1} step={1} />
-                  <InputField label="Leverage" value={execLev} onChange={setExecLev} type="number" min={1} max={100} step={1} />
+                  {execMode === 'futures' && (
+                    <InputField label="Leverage" value={execLev} onChange={setExecLev} type="number" min={1} max={100} step={1} />
+                  )}
+                  {execMode === 'spot' && (
+                    <div className="flex items-end pb-2.5">
+                      <div className="text-xs font-mono text-[#3d5a73]">Spot: sem leverage · sem TP/SL</div>
+                    </div>
+                  )}
                 </div>
 
                 {execOrderType === 'Limit' && (
                   <InputField label="Preço Limite" value={execLimitPrice} onChange={setExecLimitPrice} type="number" step={0.01} placeholder="0.00" />
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
-                  <InputField label="Take Profit (opcional)" value={execTp} onChange={setExecTp} type="number" step={0.01} placeholder="0.00" />
-                  <InputField label="Stop Loss (opcional)" value={execSl} onChange={setExecSl} type="number" step={0.01} placeholder="0.00" />
-                </div>
+                {execMode === 'futures' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <InputField label="Take Profit (opcional)" value={execTp} onChange={setExecTp} type="number" step={0.01} placeholder="0.00" />
+                    <InputField label="Stop Loss (opcional)" value={execSl} onChange={setExecSl} type="number" step={0.01} placeholder="0.00" />
+                  </div>
+                )}
 
+                {/* Summary */}
                 <div className="p-3 rounded-xl bg-[#0c1f35] border border-[#1a3a5c] space-y-1.5 text-xs font-mono">
+                  <div className="flex justify-between"><span className="text-[#3d5a73]">Modo</span><ModeBadge mode={execMode} /></div>
                   <div className="flex justify-between"><span className="text-[#3d5a73]">Par</span><span className="font-bold text-[#e8f4ff]">{execPair}</span></div>
                   <div className="flex justify-between"><span className="text-[#3d5a73]">Direção</span>
                     <span className={`font-bold ${execSide === 'Buy' ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>{execSide === 'Buy' ? '▲ LONG' : '▼ SHORT'}</span>
                   </div>
                   <div className="flex justify-between"><span className="text-[#3d5a73]">Tamanho</span><span className="text-[#e8f4ff]">${execSize} USDT</span></div>
-                  {execLev > 1 && <div className="flex justify-between"><span className="text-[#3d5a73]">Leverage</span><span className="text-[#ffcc00]">{execLev}x</span></div>}
-                  {execTp !== '' && <div className="flex justify-between"><span className="text-[#3d5a73]">TP</span><span className="text-[#00ff88]">${execTp}</span></div>}
-                  {execSl !== '' && <div className="flex justify-between"><span className="text-[#3d5a73]">SL</span><span className="text-[#ff4466]">${execSl}</span></div>}
+                  {execMode === 'futures' && execLev > 1 && <div className="flex justify-between"><span className="text-[#3d5a73]">Leverage</span><span className="text-[#ffcc00]">{execLev}x</span></div>}
+                  {execMode === 'futures' && execTp !== '' && <div className="flex justify-between"><span className="text-[#3d5a73]">TP</span><span className="text-[#00ff88]">${execTp}</span></div>}
+                  {execMode === 'futures' && execSl !== '' && <div className="flex justify-between"><span className="text-[#3d5a73]">SL</span><span className="text-[#ff4466]">${execSl}</span></div>}
                 </div>
 
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -477,13 +604,14 @@ export default function AutoTraderTab({ user }: { user: any }) {
                   className={`w-full py-3 rounded-xl text-sm font-bold font-mono border transition-all flex items-center justify-center gap-2 disabled:opacity-40
                     ${execSide === 'Buy' ? 'bg-[#00ff88]/15 text-[#00ff88] border-[#00ff88]/40 hover:bg-[#00ff88]/25' : 'bg-[#ff4466]/15 text-[#ff4466] border-[#ff4466]/40 hover:bg-[#ff4466]/25'}`}>
                   {loading ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
-                  {execSide === 'Buy' ? `COMPRAR ${execPair} — $${execSize}` : `VENDER ${execPair} — $${execSize}`}
+                  {execSide === 'Buy' ? `COMPRAR ${execPair}` : `VENDER ${execPair}`} — ${execSize}
+                  {execMode === 'futures' && execLev > 1 && <span className="opacity-70">· {execLev}x</span>}
                 </button>
               </>
             )}
           </div>
 
-          {/* Auto config */}
+          {/* Auto Config */}
           <div className="glass-card p-5 space-y-4">
             <div className="flex items-center gap-2">
               <Settings size={16} className="text-[#00d4ff]" />
@@ -491,14 +619,55 @@ export default function AutoTraderTab({ user }: { user: any }) {
             </div>
             <div className="text-xs font-mono text-[#3d5a73]">Parâmetros para execução automática quando o sinal AI for gerado.</div>
 
+            {/* Mode selector */}
+            <ModeSelector value={cfgMode} onChange={setCfgMode} />
+
+            {cfgMode === 'futures' && (
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-[#ff9900]/5 border border-[#ff9900]/20">
+                <Info size={13} className="text-[#ff9900] flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-[#ff9900]/80 font-mono">
+                  Futuros: leverage real, TP/SL nativos na exchange. Bybit e MEXC usam perpetuals USDT-margined (category=linear).
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
-              <SelectField label="Par" value={cfgPair} onChange={setCfgPair} options={PAIRS.map(p => ({ value: p, label: p }))} />
-              <SelectField label="Timeframe" value={cfgTf} onChange={setCfgTf} options={TIMEFRAMES.map(t => ({ value: t, label: t }))} />
+              <SelectField label="Par" value={cfgPair} onChange={setCfgPair}
+                options={cfgPairs.map(p => ({ value: p, label: p }))} />
+              <SelectField label="Timeframe" value={cfgTf} onChange={setCfgTf}
+                options={cfgTimeframes.map(t => ({ value: t, label: t }))} />
             </div>
+
             <div className="grid grid-cols-2 gap-3">
               <InputField label="Tamanho (USDT)" value={cfgSize} onChange={setCfgSize} type="number" min={1} step={1} />
-              <InputField label="Leverage" value={cfgLeverage} onChange={setCfgLeverage} type="number" min={1} max={100} step={1} />
+              {cfgMode === 'futures' ? (
+                <InputField label="Leverage" value={cfgLeverage} onChange={setCfgLeverage} type="number" min={1} max={100} step={1} />
+              ) : (
+                <div className="flex flex-col justify-end">
+                  <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Leverage</label>
+                  <div className="w-full bg-[#0c1f35] border border-[#1a3a5c]/50 rounded-lg px-3 py-2.5 text-sm text-[#3d5a73] font-mono">
+                    1× (spot)
+                  </div>
+                </div>
+              )}
             </div>
+
+            {cfgMode === 'futures' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Mult. TP</label>
+                  <input type="range" min={0.5} max={5} step={0.1} value={cfgTpMul} onChange={e => setCfgTpMul(parseFloat(e.target.value))}
+                    className="w-full h-1.5 rounded-full appearance-none bg-[#1a3a5c] accent-[#00ff88]" />
+                  <div className="text-xs font-mono text-[#00ff88] mt-1 text-center">{cfgTpMul.toFixed(1)}×</div>
+                </div>
+                <div>
+                  <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Mult. SL</label>
+                  <input type="range" min={0.5} max={3} step={0.1} value={cfgSlMul} onChange={e => setCfgSlMul(parseFloat(e.target.value))}
+                    className="w-full h-1.5 rounded-full appearance-none bg-[#1a3a5c] accent-[#ff4466]" />
+                  <div className="text-xs font-mono text-[#ff4466] mt-1 text-center">{cfgSlMul.toFixed(1)}×</div>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-2">Perfil de Risco</label>
@@ -514,25 +683,15 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Multiplicador TP</label>
-                <input type="range" min={0.5} max={5} step={0.1} value={cfgTpMul} onChange={e => setCfgTpMul(parseFloat(e.target.value))}
-                  className="w-full h-1.5 rounded-full appearance-none bg-[#1a3a5c] accent-[#00ff88]" />
-                <div className="text-xs font-mono text-[#00ff88] mt-1 text-center">{cfgTpMul.toFixed(1)}×</div>
-              </div>
-              <div>
-                <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Multiplicador SL</label>
-                <input type="range" min={0.5} max={3} step={0.1} value={cfgSlMul} onChange={e => setCfgSlMul(parseFloat(e.target.value))}
-                  className="w-full h-1.5 rounded-full appearance-none bg-[#1a3a5c] accent-[#ff4466]" />
-                <div className="text-xs font-mono text-[#ff4466] mt-1 text-center">{cfgSlMul.toFixed(1)}×</div>
-              </div>
+            <div className="grid grid-cols-2 gap-3">
+              <InputField label="Máx. ordens abertas" value={cfgMaxTrades} onChange={setCfgMaxTrades} type="number" min={1} max={20} step={1} />
+              <InputField label="Confiança mínima (%)" value={cfgMinConf} onChange={setCfgMinConf} type="number" min={50} max={99} step={1} />
             </div>
 
             <div className="flex items-center justify-between p-3 rounded-xl bg-[#0c1f35] border border-[#1a3a5c]">
               <div>
                 <div className="text-xs font-bold">Execução Automática</div>
-                <div className="text-[10px] font-mono text-[#3d5a73]">Executa quando AI gera sinal A ou B</div>
+                <div className="text-[10px] font-mono text-[#3d5a73]">Executa quando AI gera sinal com confiança ≥ {cfgMinConf}%</div>
               </div>
               <button onClick={() => setCfgAutoExec(!cfgAutoExec)}>
                 {cfgAutoExec ? <ToggleRight size={24} className="text-[#00d4ff]" /> : <ToggleLeft size={24} className="text-[#3d5a73]" />}
@@ -542,7 +701,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
             <button onClick={saveConfig} disabled={loading || !selectedKey}
               className="w-full py-2.5 rounded-xl bg-[#00d4ff]/15 text-[#00d4ff] border border-[#00d4ff]/30 text-sm font-bold font-mono hover:bg-[#00d4ff]/25 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
               {loading ? <RefreshCw size={14} className="animate-spin" /> : <Settings size={14} />}
-              Guardar Config
+              Guardar Config {cfgMode === 'futures' ? '⚡ Futuros' : '💰 Spot'}
             </button>
 
             {configs.length > 0 && (
@@ -550,12 +709,14 @@ export default function AutoTraderTab({ user }: { user: any }) {
                 <div className="text-xs font-mono text-[#3d5a73] mb-2">Configs ativas:</div>
                 {configs.map(c => (
                   <div key={c.id} className="flex items-center justify-between p-2.5 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] text-xs font-mono">
-                    <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <ModeBadge mode={c.trade_mode || 'spot'} />
                       <span className="font-bold text-[#e8f4ff]">{c.pair}</span>
-                      <span className="text-[#3d5a73] ml-2">{c.timeframe} · ${c.order_size_usdt} · {c.leverage}x</span>
+                      <span className="text-[#3d5a73]">{c.timeframe} · ${c.order_size_usdt}</span>
+                      {c.trade_mode === 'futures' && c.leverage > 1 && <span className="text-[#ff9900]">{c.leverage}x</span>}
                     </div>
                     <div className="flex items-center gap-1.5">
-                      {c.auto_execute && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#00ff88]/10 text-[#00ff88] border border-[#00ff88]/30">AUTO</span>}
+                      {c.auto_execute && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#00ff88]/10 text-[#00ff88] border border-[#00ff88]/30">AUTO ≥{c.min_confidence}%</span>}
                     </div>
                   </div>
                 ))}
@@ -565,16 +726,29 @@ export default function AutoTraderTab({ user }: { user: any }) {
         </div>
       )}
 
-      {/* ── HISTORY ─────────────────────────────────────────────────────── */}
+      {/* ── HISTORY ──────────────────────────────────────────────────────── */}
       {activeSection === 'history' && (
         <div className="glass-card p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <span className="text-sm font-bold">Histórico de Ordens</span>
-            <button onClick={loadTrades} className="w-7 h-7 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#00d4ff]"><RefreshCw size={12} /></button>
+            <div className="flex items-center gap-2">
+              {/* Filter pills */}
+              {(['all', 'spot', 'futures'] as const).map(f => (
+                <button key={f} onClick={() => setHistFilter(f)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold font-mono border transition-all ${histFilter === f
+                    ? f === 'futures' ? 'bg-[#ff9900]/15 text-[#ff9900] border-[#ff9900]/30'
+                    : f === 'spot' ? 'bg-[#00ff88]/15 text-[#00ff88] border-[#00ff88]/30'
+                    : 'bg-[#00d4ff]/10 text-[#00d4ff] border-[#00d4ff]/20'
+                    : 'text-[#3d5a73] border-[#1a3a5c] hover:border-[#3d5a73]'}`}>
+                  {f === 'all' ? 'TODOS' : f === 'spot' ? '💰 SPOT' : '⚡ FUTUROS'}
+                </button>
+              ))}
+              <button onClick={loadTrades} className="w-7 h-7 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#00d4ff]"><RefreshCw size={12} /></button>
+            </div>
           </div>
-          {trades.length === 0 ? (
+          {filteredTrades.length === 0 ? (
             <div className="text-center py-12">
-              <Bot size={40} className="text-[#1a3a5c] mx-auto mb-3" />
+              <BarChart2 size={40} className="text-[#1a3a5c] mx-auto mb-3" />
               <div className="text-sm font-bold text-[#3d5a73]">Sem ordens ainda</div>
             </div>
           ) : (
@@ -583,6 +757,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
                 <thead>
                   <tr className="text-[#3d5a73] border-b border-[#1a3a5c]">
                     <th className="text-left py-2 pr-3">Exchange</th>
+                    <th className="text-left py-2 pr-3">Modo</th>
                     <th className="text-left py-2 pr-3">Par</th>
                     <th className="text-left py-2 pr-3">Dir.</th>
                     <th className="text-right py-2 pr-3">Qty</th>
@@ -590,13 +765,15 @@ export default function AutoTraderTab({ user }: { user: any }) {
                     <th className="text-right py-2 pr-3">TP</th>
                     <th className="text-right py-2 pr-3">SL</th>
                     <th className="text-center py-2 pr-3">Status</th>
+                    <th className="text-center py-2 pr-3">Origem</th>
                     <th className="text-right py-2">Data</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {trades.map(t => (
+                  {filteredTrades.map(t => (
                     <tr key={t.id} className="border-b border-[#1a3a5c]/30 hover:bg-[#0c1f35]/50 transition-all">
                       <td className="py-2.5 pr-3"><ExchangeBadge exchange={t.exchange || 'bybit'} /></td>
+                      <td className="py-2.5 pr-3"><ModeBadge mode={t.trade_mode || 'spot'} /></td>
                       <td className="py-2.5 pr-3 font-bold text-[#e8f4ff]">{t.pair}</td>
                       <td className="py-2.5 pr-3"><span className={`font-bold ${t.side === 'Buy' ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>{t.side === 'Buy' ? '▲' : '▼'} {t.side.toUpperCase()}</span></td>
                       <td className="py-2.5 pr-3 text-right text-[#8ba3be]">{t.qty.toFixed(5)}</td>
@@ -604,6 +781,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
                       <td className="py-2.5 pr-3 text-right text-[#00ff88]">{t.take_profit > 0 ? `$${t.take_profit.toFixed(4)}` : '—'}</td>
                       <td className="py-2.5 pr-3 text-right text-[#ff4466]">{t.stop_loss > 0 ? `$${t.stop_loss.toFixed(4)}` : '—'}</td>
                       <td className="py-2.5 pr-3 text-center"><StatusBadge status={t.status} /></td>
+                      <td className="py-2.5 pr-3 text-center"><TriggeredBadge triggeredBy={t.triggered_by} /></td>
                       <td className="py-2.5 text-right text-[#3d5a73]">{t.created_at ? new Date(t.created_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
                     </tr>
                   ))}
