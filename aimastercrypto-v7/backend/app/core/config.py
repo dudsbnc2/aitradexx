@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""  # OpenRouter — acesso a modelos gratuitos (Llama, Mistral, etc.)
 
     # External APIs
     CRYPTOCOMPARE_API_KEY: str = ""
