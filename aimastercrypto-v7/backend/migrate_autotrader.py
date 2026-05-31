@@ -1,9 +1,6 @@
 """
-Migration v2: Auto-trade melhorias
-- pair nullable (modo automático IA)
-- adicionar trade_mode e min_confidence às configs
-- adicionar trade_mode e triggered_by aos logs
-Run: python migrate_autotrader_v2.py
+Migration: Add AutoTrader tables
+Run: python migrate_autotrader.py
 """
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -14,64 +11,64 @@ DB_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./tradeia.db")
 if DB_URL.startswith("postgres://"):
     DB_URL = DB_URL.replace("postgres://", "postgresql+asyncpg://", 1)
 
-IS_SQLITE = "sqlite" in DB_URL
+SQL = """
+CREATE TABLE IF NOT EXISTS exchange_keys (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    exchange VARCHAR(30) DEFAULT 'bybit',
+    api_key VARCHAR(255) NOT NULL,
+    api_secret_encrypted VARCHAR(512) NOT NULL,
+    label VARCHAR(100) DEFAULT 'Main Account',
+    testnet BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
-MIGRATIONS = [
-    # auto_trade_configs: pair nullable (modo AI automático)
-    "ALTER TABLE auto_trade_configs ALTER COLUMN pair DROP NOT NULL"
-        if not IS_SQLITE else
-        "SELECT 1",  # SQLite não suporta ALTER COLUMN; a coluna já é nullable por omissão
+CREATE TABLE IF NOT EXISTS auto_trade_configs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    exchange_key_id INTEGER NOT NULL REFERENCES exchange_keys(id),
+    pair VARCHAR(20) NOT NULL,
+    timeframe VARCHAR(5) DEFAULT '1H',
+    order_size_usdt NUMERIC(12,2) DEFAULT 10,
+    leverage INTEGER DEFAULT 1,
+    risk_profile VARCHAR(20) DEFAULT 'balanced',
+    tp_multiplier NUMERIC(4,2) DEFAULT 1.0,
+    sl_multiplier NUMERIC(4,2) DEFAULT 1.0,
+    max_open_trades INTEGER DEFAULT 3,
+    auto_execute BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
-    # auto_trade_configs: adicionar trade_mode se não existir
-    """ALTER TABLE auto_trade_configs
-       ADD COLUMN IF NOT EXISTS trade_mode VARCHAR(10) DEFAULT 'spot'""",
-
-    # auto_trade_configs: adicionar min_confidence se não existir
-    """ALTER TABLE auto_trade_configs
-       ADD COLUMN IF NOT EXISTS min_confidence INTEGER DEFAULT 70""",
-
-    # trade_logs: adicionar trade_mode se não existir
-    """ALTER TABLE trade_logs
-       ADD COLUMN IF NOT EXISTS trade_mode VARCHAR(10) DEFAULT 'spot'""",
-
-    # trade_logs: adicionar triggered_by se não existir
-    """ALTER TABLE trade_logs
-       ADD COLUMN IF NOT EXISTS triggered_by VARCHAR(30) DEFAULT 'manual'""",
-
-    # trade_logs: adicionar signal_id se não existir
-    """ALTER TABLE trade_logs
-       ADD COLUMN IF NOT EXISTS signal_id INTEGER""",
-]
-
-# SQLite não suporta ADD COLUMN IF NOT EXISTS — usa CREATE TABLE caso não exista
-SQLITE_MIGRATIONS = [
-    "SELECT 1",  # pair já é nullable em SQLite
-    "ALTER TABLE auto_trade_configs ADD COLUMN trade_mode VARCHAR(10) DEFAULT 'spot'",
-    "ALTER TABLE auto_trade_configs ADD COLUMN min_confidence INTEGER DEFAULT 70",
-    "ALTER TABLE trade_logs ADD COLUMN trade_mode VARCHAR(10) DEFAULT 'spot'",
-    "ALTER TABLE trade_logs ADD COLUMN triggered_by VARCHAR(30) DEFAULT 'manual'",
-    "ALTER TABLE trade_logs ADD COLUMN signal_id INTEGER",
-]
+CREATE TABLE IF NOT EXISTS trade_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    exchange_key_id INTEGER REFERENCES exchange_keys(id),
+    exchange VARCHAR(30) DEFAULT 'bybit',
+    pair VARCHAR(20),
+    side VARCHAR(10),
+    order_type VARCHAR(20),
+    qty NUMERIC(20,8),
+    price NUMERIC(20,8),
+    take_profit NUMERIC(20,8),
+    stop_loss NUMERIC(20,8),
+    leverage INTEGER DEFAULT 1,
+    order_id VARCHAR(100),
+    status VARCHAR(20) DEFAULT 'pending',
+    error_msg TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+"""
 
 async def run():
     engine = create_async_engine(DB_URL)
-    stmts = SQLITE_MIGRATIONS if IS_SQLITE else MIGRATIONS
     async with engine.begin() as conn:
-        for stmt in stmts:
+        for stmt in SQL.strip().split(";"):
             stmt = stmt.strip()
-            if not stmt or stmt == "SELECT 1":
-                continue
-            try:
+            if stmt:
                 await conn.execute(text(stmt))
-                print(f"✓ {stmt[:60]}...")
-            except Exception as e:
-                # Ignorar erros "column already exists"
-                if "already exists" in str(e).lower() or "duplicate column" in str(e).lower():
-                    print(f"  (já existe, ok) {stmt[:60]}...")
-                else:
-                    print(f"✗ ERRO: {e}")
-                    print(f"  SQL: {stmt}")
-    print("\n✓ Migração v2 concluída")
+    print("✓ AutoTrader tables created successfully")
 
 if __name__ == "__main__":
     asyncio.run(run())
