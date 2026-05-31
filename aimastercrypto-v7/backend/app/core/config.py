@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15  # V7: reduzido de 60 para 15 min (httpOnly cookie refresh)
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # Encriptação das API secrets das exchanges (Fernet key base64url de 32 bytes)
+    # Gerar com: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # OBRIGATÓRIO em produção — sem isto os segredos ficam vulneráveis
+    ENCRYPTION_KEY: str = ""
+
     # AI Keys
     GROQ_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
