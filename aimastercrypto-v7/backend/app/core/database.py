@@ -66,14 +66,30 @@ async def get_db():
 async def create_tables():
     if engine is None:
         return
+    from sqlalchemy import text
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Migration: add columns that may be missing from older deployments
-        await conn.execute(
-            __import__("sqlalchemy").text(
-                "ALTER TABLE signals ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;"
-            )
-        )
+
+        # ── Migrations: add columns that may be missing from older deployments ──
+        migrations = [
+            # signals
+            "ALTER TABLE signals ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;",
+            # auto_trade_configs — colunas adicionadas na v7
+            "ALTER TABLE auto_trade_configs ADD COLUMN IF NOT EXISTS trade_mode VARCHAR(10) DEFAULT 'spot';",
+            "ALTER TABLE auto_trade_configs ADD COLUMN IF NOT EXISTS min_confidence INTEGER DEFAULT 70;",
+            # trade_logs — colunas adicionadas na v7
+            "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS trade_mode VARCHAR(10) DEFAULT 'spot';",
+            "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS triggered_by VARCHAR(20) DEFAULT 'manual';",
+            "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS signal_id INTEGER;",
+            "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS leverage INTEGER DEFAULT 1;",
+        ]
+        for sql in migrations:
+            try:
+                await conn.execute(text(sql))
+            except Exception as e:
+                # Ignora erros de tabela inexistente (será criada pelo create_all acima)
+                logger.debug(f"Migration skipped (table may not exist yet): {e}")
+
     logger.info("DB tables ready (migrations applied)")
 
 
