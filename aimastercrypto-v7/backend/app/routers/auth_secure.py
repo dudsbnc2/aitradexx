@@ -79,7 +79,7 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
         value=refresh_token,
         httponly=True,           # JS não consegue ler — protege contra XSS
         secure=True,             # HTTPS only
-        samesite="lax",          # lax em vez de strict — necessário para Railway cross-service
+        samesite="none",          # lax em vez de strict — necessário para Railway cross-service
         max_age=COOKIE_MAX_AGE,
         path=COOKIE_PATH,
     )
@@ -90,7 +90,7 @@ def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(
         key=COOKIE_NAME,
         path=COOKIE_PATH,
-        samesite="lax",
+        samesite="none",
         secure=True,
     )
 
