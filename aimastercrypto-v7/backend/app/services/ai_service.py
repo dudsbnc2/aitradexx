@@ -1,6 +1,13 @@
 """
 AI Provider Service
-Multi-provider: Groq → Gemini → Anthropic → Rule Engine
+Multi-provider: Groq → OpenRouter → Gemini → Anthropic → Rule Engine
+
+OpenRouter suporta modelos gratuitos (sem custo):
+  - meta-llama/llama-3.3-70b-instruct:free
+  - mistralai/mistral-7b-instruct:free
+  - deepseek/deepseek-r1:free
+  - google/gemma-3-27b-it:free
+  - microsoft/phi-4-reasoning:free
 """
 import json
 import logging
@@ -10,6 +17,13 @@ from app.core.config import settings
 from app.services.ta_engine import rule_engine, compute_indicators
 
 logger = logging.getLogger("tradeia.ai")
+
+# Modelos gratuitos OpenRouter ordenados por qualidade de raciocínio financeiro
+OPENROUTER_FREE_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",   # Melhor qualidade geral
+    "deepseek/deepseek-r1:free",                 # Forte em raciocínio quantitativo
+    "mistralai/mistral-7b-instruct:free",        # Fallback rápido
+]
 
 
 def build_prompt(pair: str, tf: str, ind: dict, mtf: Optional[dict] = None) -> str:
@@ -113,6 +127,50 @@ async def call_groq(prompt: str) -> dict:
     return parse_json(r.json()["choices"][0]["message"]["content"])
 
 
+async def call_openrouter(prompt: str, model: str = None) -> dict:
+    """
+    Chama OpenRouter — suporta dezenas de modelos incluindo opções GRATUITAS.
+    Tenta cada modelo gratuito em sequência até um funcionar.
+    """
+    c = get_http_client()
+    models_to_try = [model] if model else OPENROUTER_FREE_MODELS
+
+    last_error = None
+    for m in models_to_try:
+        try:
+            r = await c.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://aimastercrypto.com",   # Recomendado pelo OpenRouter
+                    "X-Title": "AIMasterCrypto",
+                },
+                json={
+                    "model": m,
+                    "max_tokens": 1000,
+                    "temperature": 0.35,
+                    "messages": [
+                        {"role": "system", "content": "Professional quantitative trader. Reply ONLY with valid JSON, no markdown."},
+                        {"role": "user", "content": prompt},
+                    ],
+                },
+            )
+            r.raise_for_status()
+            data = r.json()
+            content = data["choices"][0]["message"]["content"]
+            result = parse_json(content)
+            result["_openrouter_model"] = m   # Guarda qual modelo foi usado
+            logger.info(f"OpenRouter OK com modelo: {m}")
+            return result
+        except Exception as e:
+            last_error = e
+            logger.warning(f"OpenRouter modelo {m} falhou: {e}")
+            continue
+
+    raise Exception(f"Todos os modelos OpenRouter falharam. Último erro: {last_error}")
+
+
 async def call_gemini(prompt: str) -> dict:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
     c = get_http_client()
@@ -140,7 +198,10 @@ async def call_anthropic(prompt: str) -> dict:
 
 
 async def get_ai_signal(pair: str, tf: str, ind: dict, mtf: Optional[dict] = None) -> tuple[dict, str]:
-    """Returns (signal_dict, source_name). Falls back through chain."""
+    """
+    Returns (signal_dict, source_name).
+    Fallback chain: Groq → OpenRouter (gratuito) → Gemini → Anthropic → Rule Engine
+    """
     prompt = build_prompt(pair, tf, ind, mtf)
     errors = []
 
@@ -151,6 +212,16 @@ async def get_ai_signal(pair: str, tf: str, ind: dict, mtf: Optional[dict] = Non
         except Exception as e:
             errors.append(f"Groq: {e}")
             logger.warning(f"Groq failed: {e}")
+
+    if settings.OPENROUTER_API_KEY:
+        try:
+            s = await call_openrouter(prompt)
+            model_used = s.pop("_openrouter_model", "openrouter-free")
+            short_name = model_used.split("/")[-1].replace(":free", "")
+            return enrich_signal(s, ind), f"openrouter-{short_name}"
+        except Exception as e:
+            errors.append(f"OpenRouter: {e}")
+            logger.warning(f"OpenRouter failed: {e}")
 
     if settings.GEMINI_API_KEY:
         try:
@@ -176,7 +247,13 @@ async def get_ai_signal(pair: str, tf: str, ind: dict, mtf: Optional[dict] = Non
 
 async def get_market_summary(market_data: dict) -> str:
     """Generate AI market commentary from market overview data."""
-    if not (settings.GROQ_API_KEY or settings.GEMINI_API_KEY or settings.ANTHROPIC_API_KEY):
+    has_key = any([
+        settings.GROQ_API_KEY,
+        settings.OPENROUTER_API_KEY,
+        settings.GEMINI_API_KEY,
+        settings.ANTHROPIC_API_KEY,
+    ])
+    if not has_key:
         return "AI market summary unavailable — configure an AI provider key."
 
     prompt = f"""You are a professional crypto market analyst. In 2-3 sentences, summarise the current market conditions:
@@ -189,18 +266,152 @@ Fear & Greed: {market_data.get('fear_greed', {}).get('value', 50)} ({market_data
 
 Respond in 2-3 concise sentences. Be specific about conditions. No intro phrases like "The market..."."""
 
-    try:
-        c = get_http_client()
-        if settings.GROQ_API_KEY:
+    c = get_http_client()
+
+    # Tenta Groq primeiro (mais rápido)
+    if settings.GROQ_API_KEY:
+        try:
             r = await c.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
                 json={"model": "llama-3.3-70b-versatile", "max_tokens": 200, "temperature": 0.3,
                       "messages": [{"role": "user", "content": prompt}]},
             )
-            r.raise_for_status()  # inside try — 401/429 falls through to return below
+            r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        logger.warning(f"Market summary AI: {e}")
+        except Exception as e:
+            logger.warning(f"Market summary Groq: {e}")
+
+    # Fallback para OpenRouter (gratuito)
+    if settings.OPENROUTER_API_KEY:
+        try:
+            r = await c.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                    "HTTP-Referer": "https://aimastercrypto.com",
+                    "X-Title": "AIMasterCrypto",
+                },
+                json={
+                    "model": "meta-llama/llama-3.3-70b-instruct:free",
+                    "max_tokens": 200,
+                    "temperature": 0.3,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            logger.warning(f"Market summary OpenRouter: {e}")
 
     return "Market data updated. Check indicators for detailed analysis."
+
+
+async def get_ai_health() -> dict:
+    """
+    Verifica o estado de cada provider de IA.
+    Usado pelo endpoint /admin/ai-health para diagnóstico.
+    Retorna dict com status de cada provider.
+    """
+    results = {}
+
+    # Groq
+    results["groq"] = {
+        "configured": bool(settings.GROQ_API_KEY),
+        "status": "not_configured",
+        "model": "llama-3.3-70b-versatile",
+    }
+    if settings.GROQ_API_KEY:
+        try:
+            c = get_http_client()
+            r = await c.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                json={"model": "llama-3.3-70b-versatile", "max_tokens": 10, "temperature": 0,
+                      "messages": [{"role": "user", "content": "Reply: OK"}]},
+            )
+            r.raise_for_status()
+            results["groq"]["status"] = "ok"
+        except Exception as e:
+            results["groq"]["status"] = f"error: {str(e)[:80]}"
+
+    # OpenRouter
+    results["openrouter"] = {
+        "configured": bool(settings.OPENROUTER_API_KEY),
+        "status": "not_configured",
+        "model": OPENROUTER_FREE_MODELS[0],
+        "free_models": OPENROUTER_FREE_MODELS,
+    }
+    if settings.OPENROUTER_API_KEY:
+        try:
+            c = get_http_client()
+            r = await c.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                    "HTTP-Referer": "https://aimastercrypto.com",
+                    "X-Title": "AIMasterCrypto",
+                },
+                json={
+                    "model": OPENROUTER_FREE_MODELS[0],
+                    "max_tokens": 10,
+                    "temperature": 0,
+                    "messages": [{"role": "user", "content": "Reply: OK"}],
+                },
+            )
+            r.raise_for_status()
+            results["openrouter"]["status"] = "ok"
+        except Exception as e:
+            results["openrouter"]["status"] = f"error: {str(e)[:80]}"
+
+    # Gemini
+    results["gemini"] = {
+        "configured": bool(settings.GEMINI_API_KEY),
+        "status": "not_configured",
+        "model": "gemini-2.0-flash",
+    }
+    if settings.GEMINI_API_KEY:
+        try:
+            c = get_http_client()
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
+            r = await c.post(url, json={"contents": [{"parts": [{"text": "Reply: OK"}]}],
+                                         "generationConfig": {"maxOutputTokens": 10}})
+            r.raise_for_status()
+            results["gemini"]["status"] = "ok"
+        except Exception as e:
+            results["gemini"]["status"] = f"error: {str(e)[:80]}"
+
+    # Anthropic
+    results["anthropic"] = {
+        "configured": bool(settings.ANTHROPIC_API_KEY),
+        "status": "not_configured",
+        "model": "claude-sonnet-4-20250514",
+    }
+    if settings.ANTHROPIC_API_KEY:
+        try:
+            c = get_http_client()
+            r = await c.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": settings.ANTHROPIC_API_KEY,
+                         "anthropic-version": "2023-06-01",
+                         "Content-Type": "application/json"},
+                json={"model": "claude-sonnet-4-20250514", "max_tokens": 10,
+                      "messages": [{"role": "user", "content": "Reply: OK"}]},
+            )
+            r.raise_for_status()
+            results["anthropic"]["status"] = "ok"
+        except Exception as e:
+            results["anthropic"]["status"] = f"error: {str(e)[:80]}"
+
+    # Rule engine é sempre disponível
+    results["rule_engine"] = {"configured": True, "status": "ok", "model": "rule-engine-v1"}
+
+    # Sumário
+    active = [k for k, v in results.items() if v.get("status") == "ok"]
+    results["_summary"] = {
+        "active_providers": active,
+        "total_active": len(active),
+        "fallback_chain": [p for p in ["groq", "openrouter", "gemini", "anthropic", "rule_engine"] if p in active],
+    }
+
+    return results
