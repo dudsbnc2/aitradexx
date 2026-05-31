@@ -1,6 +1,5 @@
 """
-AutoTrader router — allows users to connect their Bybit account via API key
-and execute orders directly from the platform.
+AutoTrader router — Bybit + MEXC support
 """
 from __future__ import annotations
 
@@ -8,10 +7,11 @@ import hashlib
 import hmac
 import json
 import time
+import urllib.parse
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey, Numeric
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,15 +25,17 @@ from app.core.logging_config import get_logger
 logger = get_logger("tradeia.autotrader")
 router = APIRouter(prefix="/api/autotrader", tags=["autotrader"])
 
-# ── Models ───────────────────────────────────────────────────────────────────
+SUPPORTED_EXCHANGES = ["bybit", "mexc"]
+
+# ── DB Models ─────────────────────────────────────────────────────────────────
 
 class ExchangeKey(Base):
     __tablename__ = "exchange_keys"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    exchange = Column(String(30), default="bybit")  # bybit only for now
+    exchange = Column(String(30), default="bybit")
     api_key = Column(String(255), nullable=False)
-    api_secret_encrypted = Column(String(512), nullable=False)  # stored encrypted
+    api_secret_encrypted = Column(String(512), nullable=False)
     label = Column(String(100), default="Main Account")
     testnet = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
@@ -49,11 +51,11 @@ class AutoTradeConfig(Base):
     timeframe = Column(String(5), default="1H")
     order_size_usdt = Column(Numeric(12, 2), default=10)
     leverage = Column(Integer, default=1)
-    risk_profile = Column(String(20), default="balanced")  # conservative | balanced | aggressive
-    tp_multiplier = Column(Numeric(4, 2), default=1.0)   # multiply signal TP by this
+    risk_profile = Column(String(20), default="balanced")
+    tp_multiplier = Column(Numeric(4, 2), default=1.0)
     sl_multiplier = Column(Numeric(4, 2), default=1.0)
     max_open_trades = Column(Integer, default=3)
-    auto_execute = Column(Boolean, default=False)  # false = confirm first
+    auto_execute = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -65,22 +67,23 @@ class TradeLog(Base):
     exchange_key_id = Column(Integer, ForeignKey("exchange_keys.id"))
     exchange = Column(String(30), default="bybit")
     pair = Column(String(20))
-    side = Column(String(10))  # Buy | Sell
-    order_type = Column(String(20))  # Market | Limit
+    side = Column(String(10))
+    order_type = Column(String(20))
     qty = Column(Numeric(20, 8))
     price = Column(Numeric(20, 8))
     take_profit = Column(Numeric(20, 8))
     stop_loss = Column(Numeric(20, 8))
     leverage = Column(Integer, default=1)
     order_id = Column(String(100))
-    status = Column(String(20), default="pending")  # pending | filled | failed | cancelled
+    status = Column(String(20), default="pending")
     error_msg = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-# ── Pydantic schemas ─────────────────────────────────────────────────────────
+# ── Pydantic ──────────────────────────────────────────────────────────────────
 
 class ConnectKeyRequest(BaseModel):
+    exchange: str = "bybit"
     api_key: str = Field(..., min_length=10)
     api_secret: str = Field(..., min_length=10)
     label: str = "Main Account"
@@ -93,7 +96,7 @@ class TradeConfigRequest(BaseModel):
     timeframe: str = "1H"
     order_size_usdt: float = Field(default=10, ge=1, le=100000)
     leverage: int = Field(default=1, ge=1, le=100)
-    risk_profile: str = "balanced"   # conservative | balanced | aggressive
+    risk_profile: str = "balanced"
     tp_multiplier: float = Field(default=1.0, ge=0.5, le=5.0)
     sl_multiplier: float = Field(default=1.0, ge=0.5, le=5.0)
     max_open_trades: int = Field(default=3, ge=1, le=20)
@@ -103,16 +106,16 @@ class TradeConfigRequest(BaseModel):
 class ExecuteOrderRequest(BaseModel):
     exchange_key_id: int
     pair: str
-    side: str  # Buy | Sell
+    side: str
     order_size_usdt: float = Field(..., ge=1)
     take_profit: Optional[float] = None
     stop_loss: Optional[float] = None
     leverage: int = Field(default=1, ge=1, le=100)
-    order_type: str = "Market"  # Market | Limit
+    order_type: str = "Market"
     limit_price: Optional[float] = None
 
 
-# ── Simple XOR encryption for API secret (replace with proper encryption in prod) ──
+# ── Encryption (simple XOR — replace with Fernet in production) ───────────────
 
 _ENCRYPT_KEY = "aitradexx-secret-v1"
 
@@ -126,10 +129,13 @@ def _xor_decrypt(hex_text: str) -> str:
     return "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(text))
 
 
-# ── Bybit V5 API helpers ─────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# BYBIT V5
+# ══════════════════════════════════════════════════════════════════════════════
 
 BYBIT_MAINNET = "https://api.bybit.com"
 BYBIT_TESTNET = "https://api-testnet.bybit.com"
+
 
 def _bybit_sign(api_secret: str, timestamp: str, api_key: str, recv_window: str, payload: str) -> str:
     param_str = f"{timestamp}{api_key}{recv_window}{payload}"
@@ -137,10 +143,8 @@ def _bybit_sign(api_secret: str, timestamp: str, api_key: str, recv_window: str,
 
 
 async def _bybit_request(
-    method: str,
-    endpoint: str,
-    api_key: str,
-    api_secret: str,
+    method: str, endpoint: str,
+    api_key: str, api_secret: str,
     testnet: bool = False,
     params: dict | None = None,
     body: dict | None = None,
@@ -156,7 +160,6 @@ async def _bybit_request(
         payload = json.dumps(body or {})
 
     signature = _bybit_sign(api_secret, ts, api_key, recv_window, payload)
-
     headers = {
         "X-BAPI-API-KEY": api_key,
         "X-BAPI-TIMESTAMP": ts,
@@ -166,18 +169,215 @@ async def _bybit_request(
     }
 
     async with httpx.AsyncClient(timeout=10) as client:
-        if method.upper() == "GET":
-            resp = await client.get(url, params=params, headers=headers)
-        else:
-            resp = await client.post(url, json=body, headers=headers)
+        resp = await client.get(url, params=params, headers=headers) if method.upper() == "GET" \
+            else await client.post(url, json=body, headers=headers)
 
     data = resp.json()
     if data.get("retCode", 0) != 0:
-        raise HTTPException(status_code=400, detail=f"Bybit error: {data.get('retMsg', 'Unknown error')}")
+        raise HTTPException(status_code=400, detail=f"Bybit: {data.get('retMsg', 'Unknown error')}")
     return data
 
 
-# ── Endpoints ────────────────────────────────────────────────────────────────
+async def _bybit_get_balance(api_key: str, api_secret: str, testnet: bool) -> list:
+    data = await _bybit_request(
+        "GET", "/v5/account/wallet-balance",
+        api_key=api_key, api_secret=api_secret, testnet=testnet,
+        params={"accountType": "UNIFIED"},
+    )
+    coins = []
+    for w in data.get("result", {}).get("list", []):
+        for c in w.get("coin", []):
+            if float(c.get("walletBalance", 0)) > 0:
+                coins.append({
+                    "coin": c["coin"],
+                    "balance": c["walletBalance"],
+                    "available": c.get("availableToWithdraw", "0"),
+                    "usd_value": c.get("usdValue", "0"),
+                })
+    return coins
+
+
+async def _bybit_execute(
+    api_key: str, api_secret: str, testnet: bool,
+    pair: str, side: str, order_type: str,
+    order_size_usdt: float, leverage: int,
+    take_profit: Optional[float], stop_loss: Optional[float],
+    limit_price: Optional[float],
+) -> dict:
+    # Get price
+    ticker = await _bybit_request(
+        "GET", "/v5/market/tickers", api_key=api_key, api_secret=api_secret,
+        testnet=testnet, params={"category": "spot", "symbol": pair.replace("/", "")},
+    )
+    tickers = ticker.get("result", {}).get("list", [])
+    if not tickers:
+        raise HTTPException(status_code=400, detail=f"Par {pair} não encontrado na Bybit")
+    price = float(tickers[0]["lastPrice"])
+    qty = round(order_size_usdt / price, 6)
+
+    body: dict = {
+        "category": "spot",
+        "symbol": pair.replace("/", ""),
+        "side": side,
+        "orderType": order_type,
+        "qty": str(qty),
+        "timeInForce": "IOC" if order_type == "Market" else "GTC",
+    }
+    if order_type == "Limit" and limit_price:
+        body["price"] = str(limit_price)
+    if take_profit:
+        body["takeProfit"] = str(take_profit)
+    if stop_loss:
+        body["stopLoss"] = str(stop_loss)
+
+    resp = await _bybit_request("POST", "/v5/order/create", api_key=api_key, api_secret=api_secret, testnet=testnet, body=body)
+    order_id = resp.get("result", {}).get("orderId", "")
+    return {"order_id": order_id, "price": price, "qty": qty}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MEXC V3
+# ══════════════════════════════════════════════════════════════════════════════
+
+MEXC_BASE = "https://api.mexc.com"
+
+
+def _mexc_sign(api_secret: str, params: dict) -> str:
+    query = urllib.parse.urlencode(sorted(params.items()))
+    return hmac.new(api_secret.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+async def _mexc_request(
+    method: str, endpoint: str,
+    api_key: str, api_secret: str,
+    params: dict | None = None,
+    body: dict | None = None,
+) -> dict:
+    url = f"{MEXC_BASE}{endpoint}"
+    ts = str(int(time.time() * 1000))
+    p = dict(params or {})
+    p["timestamp"] = ts
+
+    signature = _mexc_sign(api_secret, p)
+    p["signature"] = signature
+
+    headers = {
+        "X-MEXC-APIKEY": api_key,
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        if method.upper() == "GET":
+            resp = await client.get(url, params=p, headers=headers)
+        else:
+            # For POST, signature goes in query string, body is separate
+            resp = await client.post(url, params=p, json=body or {}, headers=headers)
+
+    data = resp.json()
+    # MEXC returns code 0 for success or no code field
+    if isinstance(data, dict) and data.get("code") not in (None, 0, 200):
+        raise HTTPException(status_code=400, detail=f"MEXC: {data.get('msg', data.get('message', 'Unknown error'))}")
+    return data
+
+
+async def _mexc_get_balance(api_key: str, api_secret: str) -> list:
+    data = await _mexc_request("GET", "/api/v3/account", api_key=api_key, api_secret=api_secret)
+    coins = []
+    for b in data.get("balances", []):
+        total = float(b.get("free", 0)) + float(b.get("locked", 0))
+        if total > 0:
+            coins.append({
+                "coin": b["asset"],
+                "balance": str(total),
+                "available": b.get("free", "0"),
+                "usd_value": "0",  # MEXC doesn't return USD value directly
+            })
+    return coins
+
+
+async def _mexc_execute(
+    api_key: str, api_secret: str,
+    pair: str, side: str, order_type: str,
+    order_size_usdt: float,
+    take_profit: Optional[float], stop_loss: Optional[float],
+    limit_price: Optional[float],
+) -> dict:
+    symbol = pair.replace("/", "")
+
+    # Get price first
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(f"{MEXC_BASE}/api/v3/ticker/price", params={"symbol": symbol})
+    price_data = r.json()
+    if "price" not in price_data:
+        raise HTTPException(status_code=400, detail=f"Par {pair} não encontrado na MEXC")
+    price = float(price_data["price"])
+    qty = round(order_size_usdt / price, 6)
+
+    body: dict = {
+        "symbol": symbol,
+        "side": side.upper(),  # BUY | SELL
+        "type": order_type.upper(),  # MARKET | LIMIT
+        "quantity": str(qty),
+    }
+    if order_type.upper() == "LIMIT" and limit_price:
+        body["price"] = str(limit_price)
+        body["timeInForce"] = "GTC"
+
+    resp = await _mexc_request("POST", "/api/v3/order", api_key=api_key, api_secret=api_secret, body=body)
+    order_id = str(resp.get("orderId", ""))
+    return {"order_id": order_id, "price": price, "qty": qty}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UNIFIED DISPATCHER
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _validate_connection(exchange: str, api_key: str, api_secret: str, testnet: bool) -> None:
+    """Test the API key by fetching balance."""
+    try:
+        if exchange == "bybit":
+            await _bybit_get_balance(api_key, api_secret, testnet)
+        elif exchange == "mexc":
+            await _mexc_get_balance(api_key, api_secret)
+        else:
+            raise HTTPException(status_code=400, detail=f"Exchange '{exchange}' não suportada")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Não foi possível conectar: {str(e)}")
+
+
+async def _get_balance(key: ExchangeKey) -> list:
+    secret = _xor_decrypt(key.api_secret_encrypted)
+    if key.exchange == "bybit":
+        return await _bybit_get_balance(key.api_key, secret, key.testnet)
+    elif key.exchange == "mexc":
+        return await _mexc_get_balance(key.api_key, secret)
+    return []
+
+
+async def _execute_order(key: ExchangeKey, req: ExecuteOrderRequest) -> dict:
+    secret = _xor_decrypt(key.api_secret_encrypted)
+    if key.exchange == "bybit":
+        return await _bybit_execute(
+            key.api_key, secret, key.testnet,
+            req.pair, req.side, req.order_type,
+            req.order_size_usdt, req.leverage,
+            req.take_profit, req.stop_loss, req.limit_price,
+        )
+    elif key.exchange == "mexc":
+        return await _mexc_execute(
+            key.api_key, secret,
+            req.pair, req.side, req.order_type,
+            req.order_size_usdt,
+            req.take_profit, req.stop_loss, req.limit_price,
+        )
+    raise HTTPException(status_code=400, detail="Exchange não suportada")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/connect")
 async def connect_exchange_key(
@@ -185,39 +385,27 @@ async def connect_exchange_key(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Save Bybit API key for the user. Validates the key first."""
-    # Test the key by fetching account info
-    try:
-        data = await _bybit_request(
-            "GET", "/v5/account/wallet-balance",
-            api_key=req.api_key, api_secret=req.api_secret,
-            testnet=req.testnet,
-            params={"accountType": "UNIFIED"},
-        )
-    except HTTPException as e:
-        raise HTTPException(status_code=400, detail=f"Chave inválida: {e.detail}")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Não foi possível conectar à Bybit: {str(e)}")
+    if req.exchange not in SUPPORTED_EXCHANGES:
+        raise HTTPException(status_code=400, detail=f"Exchange não suportada. Use: {SUPPORTED_EXCHANGES}")
 
-    encrypted_secret = _xor_encrypt(req.api_secret)
+    await _validate_connection(req.exchange, req.api_key, req.api_secret, req.testnet)
 
     key_obj = ExchangeKey(
         user_id=user.id,
+        exchange=req.exchange,
         api_key=req.api_key,
-        api_secret_encrypted=encrypted_secret,
+        api_secret_encrypted=_xor_encrypt(req.api_secret),
         label=req.label,
         testnet=req.testnet,
     )
     db.add(key_obj)
     await db.commit()
     await db.refresh(key_obj)
-
-    return {"id": key_obj.id, "label": key_obj.label, "exchange": "bybit", "testnet": req.testnet, "connected": True}
+    return {"id": key_obj.id, "label": key_obj.label, "exchange": req.exchange, "testnet": req.testnet, "connected": True}
 
 
 @router.get("/keys")
 async def list_keys(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """List user's connected exchange keys."""
     result = await db.execute(
         select(ExchangeKey).where(ExchangeKey.user_id == user.id, ExchangeKey.is_active == True)
     )
@@ -238,30 +426,11 @@ async def delete_key(key_id: int, user=Depends(get_current_user), db: AsyncSessi
 
 @router.get("/balance/{key_id}")
 async def get_balance(key_id: int, user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Fetch live balance from Bybit for the given key."""
     result = await db.execute(select(ExchangeKey).where(ExchangeKey.id == key_id, ExchangeKey.user_id == user.id))
     key = result.scalar_one_or_none()
     if not key:
         raise HTTPException(status_code=404, detail="Key not found")
-
-    secret = _xor_decrypt(key.api_secret_encrypted)
-    data = await _bybit_request(
-        "GET", "/v5/account/wallet-balance",
-        api_key=key.api_key, api_secret=secret,
-        testnet=key.testnet,
-        params={"accountType": "UNIFIED"},
-    )
-    wallets = data.get("result", {}).get("list", [])
-    coins = []
-    for w in wallets:
-        for c in w.get("coin", []):
-            if float(c.get("walletBalance", 0)) > 0:
-                coins.append({
-                    "coin": c["coin"],
-                    "balance": c["walletBalance"],
-                    "available": c["availableToWithdraw"],
-                    "usd_value": c.get("usdValue", "0"),
-                })
+    coins = await _get_balance(key)
     return {"coins": coins}
 
 
@@ -271,13 +440,10 @@ async def save_config(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Save/update an autotrading config for a pair."""
-    # Check key belongs to user
     result = await db.execute(select(ExchangeKey).where(ExchangeKey.id == req.exchange_key_id, ExchangeKey.user_id == user.id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=403, detail="Key not found")
 
-    # Upsert config
     existing = await db.execute(
         select(AutoTradeConfig).where(
             AutoTradeConfig.user_id == user.id,
@@ -287,14 +453,8 @@ async def save_config(
     )
     cfg = existing.scalar_one_or_none()
     if cfg:
-        cfg.timeframe = req.timeframe
-        cfg.order_size_usdt = req.order_size_usdt
-        cfg.leverage = req.leverage
-        cfg.risk_profile = req.risk_profile
-        cfg.tp_multiplier = req.tp_multiplier
-        cfg.sl_multiplier = req.sl_multiplier
-        cfg.max_open_trades = req.max_open_trades
-        cfg.auto_execute = req.auto_execute
+        for field in ["timeframe", "order_size_usdt", "leverage", "risk_profile", "tp_multiplier", "sl_multiplier", "max_open_trades", "auto_execute"]:
+            setattr(cfg, field, getattr(req, field))
     else:
         cfg = AutoTradeConfig(user_id=user.id, **req.model_dump())
         db.add(cfg)
@@ -309,7 +469,6 @@ async def list_configs(user=Depends(get_current_user), db: AsyncSession = Depend
     result = await db.execute(
         select(AutoTradeConfig).where(AutoTradeConfig.user_id == user.id, AutoTradeConfig.is_active == True)
     )
-    cfgs = result.scalars().all()
     return [
         {
             "id": c.id, "pair": c.pair, "timeframe": c.timeframe,
@@ -318,7 +477,7 @@ async def list_configs(user=Depends(get_current_user), db: AsyncSession = Depend
             "sl_multiplier": float(c.sl_multiplier), "max_open_trades": c.max_open_trades,
             "auto_execute": c.auto_execute, "exchange_key_id": c.exchange_key_id,
         }
-        for c in cfgs
+        for c in result.scalars().all()
     ]
 
 
@@ -328,72 +487,35 @@ async def execute_order(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Execute a market or limit order on Bybit."""
     result = await db.execute(select(ExchangeKey).where(ExchangeKey.id == req.exchange_key_id, ExchangeKey.user_id == user.id))
     key = result.scalar_one_or_none()
     if not key:
         raise HTTPException(status_code=403, detail="Key not found")
 
-    secret = _xor_decrypt(key.api_secret_encrypted)
-
-    # Get current price to calculate qty
-    ticker_data = await _bybit_request(
-        "GET", "/v5/market/tickers",
-        api_key=key.api_key, api_secret=secret,
-        testnet=key.testnet,
-        params={"category": "spot", "symbol": req.pair.replace("/", "")},
-    )
-    tickers = ticker_data.get("result", {}).get("list", [])
-    if not tickers:
-        raise HTTPException(status_code=400, detail=f"Par {req.pair} não encontrado na Bybit")
-
-    last_price = float(tickers[0]["lastPrice"])
-    qty = round(req.order_size_usdt / last_price, 6)
-
-    order_body: dict = {
-        "category": "spot",
-        "symbol": req.pair.replace("/", ""),
-        "side": req.side,  # Buy | Sell
-        "orderType": req.order_type,
-        "qty": str(qty),
-        "timeInForce": "IOC" if req.order_type == "Market" else "GTC",
-    }
-
-    if req.order_type == "Limit" and req.limit_price:
-        order_body["price"] = str(req.limit_price)
-    if req.take_profit:
-        order_body["takeProfit"] = str(req.take_profit)
-    if req.stop_loss:
-        order_body["stopLoss"] = str(req.stop_loss)
-
     log = TradeLog(
-        user_id=user.id,
-        exchange_key_id=req.exchange_key_id,
-        pair=req.pair,
-        side=req.side,
-        order_type=req.order_type,
-        qty=qty,
-        price=last_price,
-        take_profit=req.take_profit,
-        stop_loss=req.stop_loss,
-        leverage=req.leverage,
-        status="pending",
+        user_id=user.id, exchange_key_id=req.exchange_key_id,
+        exchange=key.exchange, pair=req.pair, side=req.side,
+        order_type=req.order_type, take_profit=req.take_profit,
+        stop_loss=req.stop_loss, leverage=req.leverage, status="pending",
     )
     db.add(log)
     await db.flush()
 
     try:
-        order_resp = await _bybit_request(
-            "POST", "/v5/order/create",
-            api_key=key.api_key, api_secret=secret,
-            testnet=key.testnet,
-            body=order_body,
-        )
-        order_id = order_resp.get("result", {}).get("orderId", "")
-        log.order_id = order_id
+        result_data = await _execute_order(key, req)
+        log.order_id = result_data["order_id"]
+        log.qty = result_data["qty"]
+        log.price = result_data["price"]
         log.status = "filled"
         await db.commit()
-        return {"success": True, "order_id": order_id, "qty": qty, "price": last_price, "side": req.side}
+        return {
+            "success": True,
+            "order_id": result_data["order_id"],
+            "qty": result_data["qty"],
+            "price": result_data["price"],
+            "side": req.side,
+            "exchange": key.exchange,
+        }
     except HTTPException as e:
         log.status = "failed"
         log.error_msg = e.detail
@@ -403,19 +525,17 @@ async def execute_order(
 
 @router.get("/trades")
 async def list_trades(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Get user's trade history from our DB."""
     result = await db.execute(
         select(TradeLog).where(TradeLog.user_id == user.id).order_by(TradeLog.created_at.desc()).limit(50)
     )
-    trades = result.scalars().all()
     return [
         {
-            "id": t.id, "pair": t.pair, "side": t.side,
+            "id": t.id, "pair": t.pair, "side": t.side, "exchange": t.exchange,
             "order_type": t.order_type, "qty": float(t.qty or 0),
             "price": float(t.price or 0), "take_profit": float(t.take_profit or 0),
             "stop_loss": float(t.stop_loss or 0), "leverage": t.leverage,
             "order_id": t.order_id, "status": t.status, "error_msg": t.error_msg,
             "created_at": t.created_at.isoformat() if t.created_at else None,
         }
-        for t in trades
+        for t in result.scalars().all()
     ]
