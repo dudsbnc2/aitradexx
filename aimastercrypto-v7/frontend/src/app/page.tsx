@@ -672,7 +672,7 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (us
           </div>
           {mode === 'register' && (
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-[#8ba3be] mb-1 block">Username</label>
+              <label className="text-[10px] font-mono uppercase tracking-wider text-[#8ba3be] mb-1 block">Nome de utilizador</label>
               <input
                 type="text"
                 value={username}
@@ -683,7 +683,7 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (us
             </div>
           )}
           <div>
-            <label className="text-[10px] font-mono uppercase tracking-wider text-[#8ba3be] mb-1 block">Password</label>
+            <label className="text-[10px] font-mono uppercase tracking-wider text-[#8ba3be] mb-1 block">Palavra-passe</label>
             <input
               type="password"
               value={password}
@@ -1109,8 +1109,8 @@ export default function Home() {
                   sub="Volume negociação 24h" icon={Activity} color="#b366ff" />
                 <MetricCard label={t.dashboard.btc_dominance} value={`${overview?.btc_dominance || 0}%`}
                   sub={`ETH: ${overview?.eth_dominance || 0}%`} icon={Shield} color="#ffcc00" />
-                <MetricCard label="Active Crypto" value={(overview?.active_cryptocurrencies || 0).toLocaleString()}
-                  sub="Listed assets" icon={Globe} color="#00ff88" />
+                <MetricCard label="Criptos Ativas" value={(overview?.active_cryptocurrencies || 0).toLocaleString()}
+                  sub="Ativos listados" icon={Globe} color="#00ff88" />
                 {fearGreed && <FearGreedGauge value={fearGreed.value} label={fearGreed.classification} />}
               </div>
 
