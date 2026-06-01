@@ -649,7 +649,7 @@ async def trigger_auto_trades(
 ) -> None:
     """
     Verifica AutoTradeConfigs com auto_execute=True.
-    Configs com pair=NULL entram em modo AI automático (aceita qualquer par).
+    Configs com pair=NULL entram em modo AI automático (aceita qualquer par com sinal suficiente).
     Executa a ordem se confiança >= min_confidence e open_trades < max_open_trades.
     Chamada assíncrona — erros são logados, nunca propagados.
     """
@@ -666,13 +666,24 @@ async def trigger_auto_trades(
                 .where(
                     # Corresponde se par específico OU modo automático (pair=None)
                     or_(AutoTradeConfig.pair == pair, AutoTradeConfig.pair == None),
-                    AutoTradeConfig.timeframe  == timeframe,
+                    # Para modo automático (pair=None), o timeframe pode ser qualquer um
+                    # Para par específico, o timeframe tem de corresponder
+                    or_(
+                        AutoTradeConfig.pair != None,  # par fixo — verifica timeframe abaixo
+                        AutoTradeConfig.pair == None,  # modo IA — aceita qualquer timeframe
+                    ),
                     AutoTradeConfig.auto_execute == True,
                     AutoTradeConfig.is_active  == True,
                     ExchangeKey.is_active      == True,
                 )
             )
             rows = result.all()
+        
+        # Filtrar: para par fixo, verificar timeframe; para modo AI, aceitar qualquer
+        rows = [
+            (cfg, key) for cfg, key in rows
+            if cfg.pair is None or cfg.timeframe == timeframe
+        ]
 
         for cfg, key in rows:
             # Verificar confiança mínima
@@ -1018,7 +1029,14 @@ async def execute_order(
         log.status    = "failed"
         log.error_msg = e.detail
         await db.commit()
+        logger.error(f"execute_order FAILED user={user['uid']} pair={req.pair} mode={req.trade_mode}: {e.detail}")
         raise
+    except Exception as e:
+        log.status    = "failed"
+        log.error_msg = str(e)
+        await db.commit()
+        logger.error(f"execute_order UNEXPECTED user={user['uid']} pair={req.pair}: {e}")
+        raise HTTPException(400, f"Erro ao executar ordem: {str(e)}")
 
 
 @router.get("/trades")
