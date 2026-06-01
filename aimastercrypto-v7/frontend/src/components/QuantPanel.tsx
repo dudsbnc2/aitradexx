@@ -220,10 +220,10 @@ export default function QuantPanel({ quant, className = '' }: QuantPanelProps) {
         </div>
 
         <div className="space-y-2">
-          <ProbBar label="P(TP HIT)" value={quant.tp_probability} color="#00ff88" />
-          <ProbBar label="P(SL HIT)" value={quant.sl_probability} color="#ff4466" />
+          <ProbBar label="P(TP ATINGIDO)" value={quant.tp_probability} color="#00ff88" />
+          <ProbBar label="P(SL ATINGIDO)" value={quant.sl_probability} color="#ff4466" />
           {quant.entry_probability !== undefined && (
-            <ProbBar label="P(ENTRY)" value={quant.entry_probability} color="#00d4ff" />
+            <ProbBar label="P(ENTRADA)" value={quant.entry_probability} color="#00d4ff" />
           )}
         </div>
 
