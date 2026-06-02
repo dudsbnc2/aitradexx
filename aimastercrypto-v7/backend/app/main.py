@@ -135,12 +135,25 @@ app.add_middleware(
     enable_hsts=(settings.ENV == "production"),
 )
 
+# CORS — permite origins da lista + qualquer subdomain *.railway.app
+def _build_cors_origins() -> list:
+    base = list(settings.CORS_ORIGINS)
+    # Em produção Railway, o frontend tem URL dinâmica — permitir todos os subdomains
+    # Se já tiver *, retorna directo
+    if "*" in base:
+        return ["*"]
+    return base
+
+_cors_origins = _build_cors_origins()
+_cors_regex   = r"https://.*\.railway\.app"   # qualquer subdomínio Railway
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=_cors_origins,
+    allow_origin_regex=_cors_regex,   # <-- fix: aceita *.railway.app dinamicamente
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
 )
 
 # Routers v7
