@@ -236,22 +236,57 @@ async def _bybit_request(
     return data
 
 
-async def _bybit_get_balance(api_key: str, api_secret: str, testnet: bool) -> list:
-    data = await _bybit_request(
-        "GET", "/v5/account/wallet-balance",
-        api_key=api_key, api_secret=api_secret, testnet=testnet,
-        params={"accountType": "UNIFIED"},
-    )
+async def _bybit_get_balance(
+    api_key: str, api_secret: str, testnet: bool,
+    trade_mode: str = "spot",
+) -> list:
+    """
+    Bybit V5:
+    - Spot / UNIFIED account: accountType=UNIFIED (mostra todos os assets do unified wallet)
+    - Futuros: accountType=CONTRACT (mostra USDT, USDC e coins da contract wallet)
+    Quando a conta usa Unified Trading Account (UTA), spot e futuros estão no mesmo
+    UNIFIED wallet, mas o CONTRACT account mostra a margem disponível para futuros.
+    Tentamos CONTRACT para futuros, UNIFIED para spot.
+    """
+    account_type = "CONTRACT" if trade_mode == "futures" else "UNIFIED"
     coins = []
-    for w in data.get("result", {}).get("list", []):
-        for c in w.get("coin", []):
-            if float(c.get("walletBalance", 0)) > 0:
-                coins.append({
-                    "coin":      c["coin"],
-                    "balance":   c["walletBalance"],
-                    "available": c.get("availableToWithdraw", "0"),
-                    "usd_value": c.get("usdValue", "0"),
-                })
+
+    try:
+        data = await _bybit_request(
+            "GET", "/v5/account/wallet-balance",
+            api_key=api_key, api_secret=api_secret, testnet=testnet,
+            params={"accountType": account_type},
+        )
+        for w in data.get("result", {}).get("list", []):
+            for c in w.get("coin", []):
+                bal = float(c.get("walletBalance", 0))
+                if bal > 0:
+                    coins.append({
+                        "coin":      c["coin"],
+                        "balance":   c["walletBalance"],
+                        "available": c.get("availableToWithdraw", c.get("availableToBorrow", "0")),
+                        "usd_value": c.get("usdValue", "0"),
+                    })
+    except Exception:
+        # Fallback para UNIFIED se CONTRACT falhar (conta clássica)
+        try:
+            data = await _bybit_request(
+                "GET", "/v5/account/wallet-balance",
+                api_key=api_key, api_secret=api_secret, testnet=testnet,
+                params={"accountType": "UNIFIED"},
+            )
+            for w in data.get("result", {}).get("list", []):
+                for c in w.get("coin", []):
+                    if float(c.get("walletBalance", 0)) > 0:
+                        coins.append({
+                            "coin":      c["coin"],
+                            "balance":   c["walletBalance"],
+                            "available": c.get("availableToWithdraw", "0"),
+                            "usd_value": c.get("usdValue", "0"),
+                        })
+        except Exception:
+            pass
+
     return coins
 
 
@@ -433,7 +468,37 @@ async def _mexc_futures_request(
     return data
 
 
-async def _mexc_get_balance(api_key: str, api_secret: str) -> list:
+async def _mexc_get_balance(
+    api_key: str, api_secret: str,
+    trade_mode: str = "spot",
+) -> list:
+    """
+    MEXC:
+    - Spot: /api/v3/account  (REST v3)
+    - Futuros: /api/v1/private/account/assets  (Futures API)
+    """
+    if trade_mode == "futures":
+        # MEXC Futures API — usa _mexc_futures_request (contract.mexc.com)
+        try:
+            data = await _mexc_futures_request(
+                "GET", "/api/v1/private/account/assets",
+                api_key=api_key, api_secret=api_secret,
+            )
+            coins = []
+            for a in data.get("data", []):
+                bal = float(a.get("equity", 0) or a.get("walletBalance", 0) or 0)
+                if bal > 0:
+                    coins.append({
+                        "coin":      a.get("currency", "USDT"),
+                        "balance":   str(bal),
+                        "available": str(a.get("availableBalance", bal)),
+                        "usd_value": str(bal) if a.get("currency","").upper() == "USDT" else "0",
+                    })
+            return coins
+        except Exception:
+            pass  # Fallback para spot se futures falhar
+
+    # Spot
     data = await _mexc_request("GET", "/api/v3/account", api_key=api_key, api_secret=api_secret)
     coins = []
     for b in data.get("balances", []):
@@ -588,12 +653,12 @@ async def _validate_connection(exchange: str, api_key: str, api_secret: str, tes
         raise HTTPException(400, f"Não foi possível conectar: {str(e)}")
 
 
-async def _get_balance(key: ExchangeKey) -> list:
+async def _get_balance(key: ExchangeKey, trade_mode: str = "spot") -> list:
     secret = _decrypt_secret(key.api_secret_encrypted)
     if key.exchange == "bybit":
-        return await _bybit_get_balance(key.api_key, secret, key.testnet)
+        return await _bybit_get_balance(key.api_key, secret, key.testnet, trade_mode)
     elif key.exchange == "mexc":
-        return await _mexc_get_balance(key.api_key, secret)
+        return await _mexc_get_balance(key.api_key, secret, trade_mode)
     return []
 
 
@@ -649,7 +714,7 @@ async def trigger_auto_trades(
 ) -> None:
     """
     Verifica AutoTradeConfigs com auto_execute=True.
-    Configs com pair=NULL entram em modo AI automático (aceita qualquer par com sinal suficiente).
+    Configs com pair=NULL entram em modo AI automático (aceita qualquer par).
     Executa a ordem se confiança >= min_confidence e open_trades < max_open_trades.
     Chamada assíncrona — erros são logados, nunca propagados.
     """
@@ -666,24 +731,13 @@ async def trigger_auto_trades(
                 .where(
                     # Corresponde se par específico OU modo automático (pair=None)
                     or_(AutoTradeConfig.pair == pair, AutoTradeConfig.pair == None),
-                    # Para modo automático (pair=None), o timeframe pode ser qualquer um
-                    # Para par específico, o timeframe tem de corresponder
-                    or_(
-                        AutoTradeConfig.pair != None,  # par fixo — verifica timeframe abaixo
-                        AutoTradeConfig.pair == None,  # modo IA — aceita qualquer timeframe
-                    ),
+                    AutoTradeConfig.timeframe  == timeframe,
                     AutoTradeConfig.auto_execute == True,
                     AutoTradeConfig.is_active  == True,
                     ExchangeKey.is_active      == True,
                 )
             )
             rows = result.all()
-        
-        # Filtrar: para par fixo, verificar timeframe; para modo AI, aceitar qualquer
-        rows = [
-            (cfg, key) for cfg, key in rows
-            if cfg.pair is None or cfg.timeframe == timeframe
-        ]
 
         for cfg, key in rows:
             # Verificar confiança mínima
@@ -862,14 +916,24 @@ async def delete_key(key_id: int, user=Depends(get_current_user), db: AsyncSessi
 
 
 @router.get("/balance/{key_id}")
-async def get_balance(key_id: int, user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def get_balance(
+    key_id: int,
+    mode: str = "spot",   # "spot" | "futures"
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retorna o saldo da wallet correcta:
+    - mode=spot    → Spot wallet (UNIFIED no Bybit, /api/v3/account no MEXC)
+    - mode=futures → Contract/Futures wallet (CONTRACT no Bybit, futures API no MEXC)
+    """
     result = await db.execute(
         select(ExchangeKey).where(ExchangeKey.id == key_id, ExchangeKey.user_id == user["uid"])
     )
     key = result.scalar_one_or_none()
     if not key:
         raise HTTPException(404, "Key not found")
-    return {"coins": await _get_balance(key)}
+    return {"coins": await _get_balance(key, trade_mode=mode), "mode": mode}
 
 
 @router.get("/timeframes")
@@ -1029,14 +1093,7 @@ async def execute_order(
         log.status    = "failed"
         log.error_msg = e.detail
         await db.commit()
-        logger.error(f"execute_order FAILED user={user['uid']} pair={req.pair} mode={req.trade_mode}: {e.detail}")
         raise
-    except Exception as e:
-        log.status    = "failed"
-        log.error_msg = str(e)
-        await db.commit()
-        logger.error(f"execute_order UNEXPECTED user={user['uid']} pair={req.pair}: {e}")
-        raise HTTPException(400, f"Erro ao executar ordem: {str(e)}")
 
 
 @router.get("/trades")
@@ -1067,206 +1124,3 @@ async def list_trades(user=Depends(get_current_user), db: AsyncSession = Depends
         }
         for t in result.scalars().all()
     ]
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# AI-RUN — O bot faz tudo: scan → escolhe melhor sinal → executa ordem
-# ══════════════════════════════════════════════════════════════════════════════
-
-class AIRunRequest(BaseModel):
-    exchange_key_id: int
-    trade_mode:      Literal["spot", "futures"] = "spot"
-    timeframe:       str   = "1H"
-    order_size_usdt: float = Field(default=10, ge=1, le=100000)
-    leverage:        int   = Field(default=1, ge=1, le=125)
-    risk_profile:    str   = "balanced"
-    min_confidence:  int   = Field(default=70, ge=50, le=99)
-    # Pair restrito — se None varre tudo; se definido analisa só esse par
-    pair:            Optional[str] = None
-
-
-@router.post("/ai-run")
-async def ai_run(
-    req: AIRunRequest,
-    user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Execução autónoma IA:
-    1. Varre pares (ou o par fixo) no timeframe dado
-    2. Escolhe o melhor sinal (bias LONG/SHORT, maior confiança)
-    3. Aplica perfil de risco para calcular TP/SL automáticos
-    4. Executa a ordem na exchange
-    5. Devolve o resultado completo
-    """
-    from app.services.signal_service import run_scan, run_signal
-    from typing import Optional as Opt
-
-    # Verificar que a key pertence ao user
-    key_res = await db.execute(
-        select(ExchangeKey).where(
-            ExchangeKey.id == req.exchange_key_id,
-            ExchangeKey.user_id == user["uid"],
-        )
-    )
-    key = key_res.scalar_one_or_none()
-    if not key:
-        raise HTTPException(403, "Chave de exchange não encontrada para este utilizador")
-
-    # ── 1. Obter sinal ────────────────────────────────────────────────────────
-    if req.pair:
-        # Par fixo — analisa apenas esse
-        signal = await run_signal(req.pair, req.timeframe, use_mtf=True, use_ai=True)
-        signal["pair"] = req.pair
-        best = signal
-    else:
-        # Modo IA — varre tudo e escolhe o melhor
-        scan_result = await run_scan(pairs=None, timeframe=req.timeframe, use_mtf=True)
-        best = scan_result.get("best")
-        if not best:
-            return {
-                "executed": False,
-                "reason": "Nenhum sinal accionável encontrado neste momento. Tenta novamente mais tarde.",
-                "scanned": scan_result.get("scanned", 0),
-                "timeframe": req.timeframe,
-            }
-
-    bias       = best.get("bias", "WAIT")
-    confidence = best.get("confidence", 0)
-    pair       = best.get("pair", "BTC/USDT")
-
-    if bias not in ("LONG", "SHORT"):
-        return {
-            "executed": False,
-            "reason": f"Melhor sinal encontrado ({pair}) está em WAIT com confiança {confidence}%. Aguarda melhor oportunidade.",
-            "signal": {"pair": pair, "bias": bias, "confidence": confidence},
-        }
-
-    if confidence < req.min_confidence:
-        return {
-            "executed": False,
-            "reason": f"Sinal {bias} em {pair} com confiança {confidence}% está abaixo do mínimo ({req.min_confidence}%). Não executado.",
-            "signal": {"pair": pair, "bias": bias, "confidence": confidence},
-        }
-
-    # ── 2. Calcular TP/SL com base no perfil de risco ─────────────────────────
-    entry_price = float(best.get("entry") or best.get("entryPrice") or 0)
-    raw_tp      = float(best.get("takeProfit") or best.get("take_profit") or 0)
-    raw_sl      = float(best.get("stopLoss")   or best.get("stop_loss")   or 0)
-
-    risk_multipliers = {
-        "conservative": (0.8,  0.5),
-        "balanced":     (1.5,  1.0),
-        "aggressive":   (3.0,  1.5),
-    }
-    tp_mul, sl_mul = risk_multipliers.get(req.risk_profile, (1.5, 1.0))
-
-    take_profit: Opt[float] = None
-    stop_loss:   Opt[float] = None
-
-    if req.trade_mode == "futures" and entry_price > 0:
-        if raw_tp and raw_sl:
-            # Ajustar TP/SL do sinal pelo multiplicador de risco
-            tp_dist = abs(raw_tp - entry_price) * tp_mul
-            sl_dist = abs(raw_sl - entry_price) * sl_mul
-            if bias == "LONG":
-                take_profit = round(entry_price + tp_dist, 8)
-                stop_loss   = round(entry_price - sl_dist, 8)
-            else:
-                take_profit = round(entry_price - tp_dist, 8)
-                stop_loss   = round(entry_price + sl_dist, 8)
-        elif entry_price > 0:
-            # Sem TP/SL no sinal — estimar com ATR ou percentagem fixa
-            atr = float(best.get("quant", {}).get("atr", 0) or best.get("atr", 0) or entry_price * 0.02)
-            if bias == "LONG":
-                take_profit = round(entry_price + atr * tp_mul * 2, 8)
-                stop_loss   = round(entry_price - atr * sl_mul,     8)
-            else:
-                take_profit = round(entry_price - atr * tp_mul * 2, 8)
-                stop_loss   = round(entry_price + atr * sl_mul,     8)
-
-    # ── 3. Criar log e executar ───────────────────────────────────────────────
-    side = "Buy" if bias == "LONG" else "Sell"
-
-    log = TradeLog(
-        user_id         = user["uid"],
-        exchange_key_id = req.exchange_key_id,
-        exchange        = key.exchange,
-        trade_mode      = req.trade_mode,
-        pair            = pair,
-        side            = side,
-        order_type      = "Market",
-        take_profit     = take_profit,
-        stop_loss       = stop_loss,
-        leverage        = req.leverage if req.trade_mode == "futures" else 1,
-        status          = "pending",
-        triggered_by    = "ai_auto",
-    )
-    db.add(log)
-    await db.commit()
-    await db.refresh(log)
-
-    try:
-        result = await place_order(
-            exchange        = key.exchange,
-            api_key         = key.api_key,
-            api_secret      = _decrypt_secret(key.api_secret_enc),
-            testnet         = key.testnet,
-            trade_mode      = req.trade_mode,
-            pair            = pair,
-            side            = side,
-            order_size_usdt = req.order_size_usdt,
-            leverage        = req.leverage if req.trade_mode == "futures" else 1,
-            order_type      = "Market",
-            take_profit     = take_profit,
-            stop_loss       = stop_loss,
-        )
-        log.status   = "filled"
-        log.order_id = result.get("order_id", "")
-        log.qty      = result.get("qty", 0)
-        log.price    = result.get("price", entry_price)
-        await db.commit()
-
-        logger.info(
-            f"AI-RUN executed: user={user['uid']} {pair} {bias} "
-            f"mode={req.trade_mode} conf={confidence}% tf={req.timeframe} "
-            f"order={log.order_id}"
-        )
-
-        return {
-            "executed":     True,
-            "order_id":     log.order_id,
-            "pair":         pair,
-            "bias":         bias,
-            "side":         side,
-            "confidence":   confidence,
-            "timeframe":    req.timeframe,
-            "trade_mode":   req.trade_mode,
-            "price":        log.price,
-            "qty":          log.qty,
-            "take_profit":  take_profit,
-            "stop_loss":    stop_loss,
-            "leverage":     log.leverage,
-            "risk_profile": req.risk_profile,
-            "signal":       {
-                "pair":       pair,
-                "bias":       bias,
-                "confidence": confidence,
-                "analysis":   best.get("analysis", ""),
-                "entry":      entry_price,
-            },
-        }
-
-    except HTTPException as e:
-        log.status    = "failed"
-        log.error_msg = e.detail
-        await db.commit()
-        logger.error(f"AI-RUN failed: user={user['uid']} {pair} {bias}: {e.detail}")
-        raise HTTPException(400, f"Ordem falhou: {e.detail}")
-
-    except Exception as e:
-        log.status    = "failed"
-        log.error_msg = str(e)
-        await db.commit()
-        logger.error(f"AI-RUN unexpected error: user={user['uid']} {pair}: {e}")
-        raise HTTPException(500, f"Erro inesperado: {str(e)}")
