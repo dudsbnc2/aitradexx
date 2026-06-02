@@ -1204,14 +1204,22 @@ async def ai_run(
         raise HTTPException(403, "Exchange key não encontrada ou inativa.")
 
     # ── 1. Obter sinal de IA ───────────────────────────────────────────────
+    # Spot: o utilizador deve sempre indicar o par — scan automático só em futures
+    if req.trade_mode == "spot" and not req.pair:
+        raise HTTPException(
+            400,
+            "Modo Spot requer um par específico (ex: BTC/USDT). "
+            "O scan automático de pares só está disponível em modo Futures."
+        )
+
     try:
         if req.pair:
-            # Sinal para par específico
+            # Sinal para par específico (obrigatório em spot, opcional em futures)
             signal = await run_signal(req.pair, req.timeframe, use_mtf=True, user_id=user["uid"])
             signal.setdefault("pair", req.pair)
             scanned = 1
         else:
-            # Scan automático — escolhe o melhor par com sinal LONG/SHORT
+            # Scan automático — apenas futures, escolhe o melhor par LONG/SHORT
             scan = await run_scan(SCAN_PAIRS, timeframe=req.timeframe, use_mtf=True)
             scanned = scan.get("scanned", len(SCAN_PAIRS))
             best = scan.get("best")
@@ -1224,6 +1232,8 @@ async def ai_run(
                     "trade_mode": req.trade_mode,
                 }
             signal = best
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"ai-run signal error user={user['uid']}: {e}")
         raise HTTPException(500, f"Erro ao obter sinal de IA: {e}")
@@ -1261,7 +1271,7 @@ async def ai_run(
             "trade_mode": req.trade_mode,
         }
 
-    # Spot não suporta SHORT (SELL a descoberto) — apenas LONG (BUY) é válido em spot
+    # Spot não suporta SHORT — informa o utilizador e devolve o sinal sem executar
     if req.trade_mode == "spot" and bias == "SHORT":
         return {
             "executed":   False,
@@ -1269,10 +1279,9 @@ async def ai_run(
             "confidence": confidence,
             "pair":       pair,
             "reason":     (
-                "Sinal SHORT em modo Spot não é executável (spot não suporta venda a descoberto). "
-                "Muda para modo Futures para executar SHORTs, ou aguarda sinal LONG."
+                f"A IA identificou sinal SHORT em {pair} (confiança: {confidence}%) mas Spot não suporta "                "venda a descoberto. Muda para modo Futures para executar SHORTs."
             ),
-            "scanned":    scanned if not req.pair else 1,
+            "scanned":    1,
             "signal":     signal,
             "timeframe":  req.timeframe,
             "trade_mode": req.trade_mode,
