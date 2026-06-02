@@ -423,9 +423,16 @@ async def _mexc_request(
             # Enviar como query params (com assinatura) e body vazio — MEXC V3 aceita ambos
             resp = await client.post(url, params=p, headers=headers)
 
-    data = resp.json()
-    if isinstance(data, dict) and data.get("code") not in (None, 0, 200):
-        raise HTTPException(400, f"MEXC: {data.get('msg', data.get('message', 'Unknown error'))}")
+    # Raise on HTTP errors first so we always get a meaningful exception
+    try:
+        data = resp.json()
+    except Exception:
+        resp.raise_for_status()
+        raise HTTPException(500, "MEXC: resposta inválida")
+    if resp.status_code >= 400 or (isinstance(data, dict) and data.get("code") not in (None, 0, 200)):
+        err_msg = data.get("msg") or data.get("message") or str(data)
+        logger.error(f"MEXC API error {resp.status_code}: {err_msg} | body={data}")
+        raise HTTPException(400, f"MEXC: {err_msg}")
     return data
 
 
@@ -515,17 +522,31 @@ async def _mexc_get_balance(
 
 
 
-def _format_mexc_quantity(quantity: float, step_size: str = "0.00001") -> float:
-    """Formata a quantidade conforme o stepSize do par MEXC para evitar erros de precisão."""
+def _format_mexc_quantity(quantity: float, step_size: str = "0.00001") -> str:
+    """
+    Formata a quantidade como string conforme o stepSize do par MEXC.
+    Usa FLOOR (nunca arredonda para cima) para evitar rejeição por quantidade inválida.
+    Retorna string sem trailing zeros e sem ponto decimal desnecessário.
+    """
+    import math
     try:
         step = float(step_size)
         if step <= 0:
-            return round(quantity, 6)
-        decimal_places = len(step_size.rstrip("0").split(".")[1]) if "." in step_size else 0
-        formatted = round(round(quantity / step) * step, decimal_places)
-        return formatted
+            return str(round(quantity, 6))
+        # Floor para o múltiplo de step mais próximo por baixo
+        floored = math.floor(quantity / step) * step
+        # Número de casas decimais do stepSize
+        if "." in step_size:
+            decimal_places = len(step_size.rstrip("0").split(".")[1])
+        else:
+            decimal_places = 0
+        if decimal_places == 0:
+            # Quantidade inteira — enviar sem ponto decimal
+            return str(int(round(floored)))
+        else:
+            return f"{floored:.{decimal_places}f}"
     except Exception:
-        return round(quantity, 6)
+        return str(round(quantity, 6))
 
 
 async def _mexc_get_step_size(pair: str, api_key: str) -> str:
@@ -567,7 +588,7 @@ async def _mexc_execute_spot(
         "symbol":   symbol,
         "side":     side.upper(),       # BUY | SELL
         "type":     order_type.upper(), # MARKET | LIMIT
-        "quantity": str(qty),
+        "quantity": qty,                # already a formatted string
     }
     if order_type.upper() == "LIMIT" and limit_price:
         body["price"]       = str(limit_price)
@@ -1234,6 +1255,23 @@ async def ai_run(
             "confidence": confidence,
             "pair":       pair,
             "reason":     f"Confiança {confidence}% abaixo do mínimo {req.min_confidence}%.",
+            "scanned":    scanned if not req.pair else 1,
+            "signal":     signal,
+            "timeframe":  req.timeframe,
+            "trade_mode": req.trade_mode,
+        }
+
+    # Spot não suporta SHORT (SELL a descoberto) — apenas LONG (BUY) é válido em spot
+    if req.trade_mode == "spot" and bias == "SHORT":
+        return {
+            "executed":   False,
+            "bias":       bias,
+            "confidence": confidence,
+            "pair":       pair,
+            "reason":     (
+                "Sinal SHORT em modo Spot não é executável (spot não suporta venda a descoberto). "
+                "Muda para modo Futures para executar SHORTs, ou aguarda sinal LONG."
+            ),
             "scanned":    scanned if not req.pair else 1,
             "signal":     signal,
             "timeframe":  req.timeframe,
