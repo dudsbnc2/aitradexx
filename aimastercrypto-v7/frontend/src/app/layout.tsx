@@ -5,6 +5,7 @@ import { Syne } from 'next/font/google'
 import { useEffect } from 'react'
 import '../styles/globals.css'
 import { initAuth } from '@/lib/auth-manager'
+import ToastNotification from '@/components/ToastNotification'
 import { useAuthExpiredRedirect } from '@/lib/api-interceptor'
 
 const syne = Syne({
@@ -33,6 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={syne.variable}>
       <body>
         <AuthInitializer />
+        <ToastNotification />
         {children}
       </body>
     </html>
