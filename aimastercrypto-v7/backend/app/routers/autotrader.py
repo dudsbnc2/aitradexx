@@ -1067,3 +1067,206 @@ async def list_trades(user=Depends(get_current_user), db: AsyncSession = Depends
         }
         for t in result.scalars().all()
     ]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI-RUN — O bot faz tudo: scan → escolhe melhor sinal → executa ordem
+# ══════════════════════════════════════════════════════════════════════════════
+
+class AIRunRequest(BaseModel):
+    exchange_key_id: int
+    trade_mode:      Literal["spot", "futures"] = "spot"
+    timeframe:       str   = "1H"
+    order_size_usdt: float = Field(default=10, ge=1, le=100000)
+    leverage:        int   = Field(default=1, ge=1, le=125)
+    risk_profile:    str   = "balanced"
+    min_confidence:  int   = Field(default=70, ge=50, le=99)
+    # Pair restrito — se None varre tudo; se definido analisa só esse par
+    pair:            Optional[str] = None
+
+
+@router.post("/ai-run")
+async def ai_run(
+    req: AIRunRequest,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Execução autónoma IA:
+    1. Varre pares (ou o par fixo) no timeframe dado
+    2. Escolhe o melhor sinal (bias LONG/SHORT, maior confiança)
+    3. Aplica perfil de risco para calcular TP/SL automáticos
+    4. Executa a ordem na exchange
+    5. Devolve o resultado completo
+    """
+    from app.services.signal_service import run_scan, run_signal
+    from typing import Optional as Opt
+
+    # Verificar que a key pertence ao user
+    key_res = await db.execute(
+        select(ExchangeKey).where(
+            ExchangeKey.id == req.exchange_key_id,
+            ExchangeKey.user_id == user["uid"],
+        )
+    )
+    key = key_res.scalar_one_or_none()
+    if not key:
+        raise HTTPException(403, "Chave de exchange não encontrada para este utilizador")
+
+    # ── 1. Obter sinal ────────────────────────────────────────────────────────
+    if req.pair:
+        # Par fixo — analisa apenas esse
+        signal = await run_signal(req.pair, req.timeframe, use_mtf=True, use_ai=True)
+        signal["pair"] = req.pair
+        best = signal
+    else:
+        # Modo IA — varre tudo e escolhe o melhor
+        scan_result = await run_scan(pairs=None, timeframe=req.timeframe, use_mtf=True)
+        best = scan_result.get("best")
+        if not best:
+            return {
+                "executed": False,
+                "reason": "Nenhum sinal accionável encontrado neste momento. Tenta novamente mais tarde.",
+                "scanned": scan_result.get("scanned", 0),
+                "timeframe": req.timeframe,
+            }
+
+    bias       = best.get("bias", "WAIT")
+    confidence = best.get("confidence", 0)
+    pair       = best.get("pair", "BTC/USDT")
+
+    if bias not in ("LONG", "SHORT"):
+        return {
+            "executed": False,
+            "reason": f"Melhor sinal encontrado ({pair}) está em WAIT com confiança {confidence}%. Aguarda melhor oportunidade.",
+            "signal": {"pair": pair, "bias": bias, "confidence": confidence},
+        }
+
+    if confidence < req.min_confidence:
+        return {
+            "executed": False,
+            "reason": f"Sinal {bias} em {pair} com confiança {confidence}% está abaixo do mínimo ({req.min_confidence}%). Não executado.",
+            "signal": {"pair": pair, "bias": bias, "confidence": confidence},
+        }
+
+    # ── 2. Calcular TP/SL com base no perfil de risco ─────────────────────────
+    entry_price = float(best.get("entry") or best.get("entryPrice") or 0)
+    raw_tp      = float(best.get("takeProfit") or best.get("take_profit") or 0)
+    raw_sl      = float(best.get("stopLoss")   or best.get("stop_loss")   or 0)
+
+    risk_multipliers = {
+        "conservative": (0.8,  0.5),
+        "balanced":     (1.5,  1.0),
+        "aggressive":   (3.0,  1.5),
+    }
+    tp_mul, sl_mul = risk_multipliers.get(req.risk_profile, (1.5, 1.0))
+
+    take_profit: Opt[float] = None
+    stop_loss:   Opt[float] = None
+
+    if req.trade_mode == "futures" and entry_price > 0:
+        if raw_tp and raw_sl:
+            # Ajustar TP/SL do sinal pelo multiplicador de risco
+            tp_dist = abs(raw_tp - entry_price) * tp_mul
+            sl_dist = abs(raw_sl - entry_price) * sl_mul
+            if bias == "LONG":
+                take_profit = round(entry_price + tp_dist, 8)
+                stop_loss   = round(entry_price - sl_dist, 8)
+            else:
+                take_profit = round(entry_price - tp_dist, 8)
+                stop_loss   = round(entry_price + sl_dist, 8)
+        elif entry_price > 0:
+            # Sem TP/SL no sinal — estimar com ATR ou percentagem fixa
+            atr = float(best.get("quant", {}).get("atr", 0) or best.get("atr", 0) or entry_price * 0.02)
+            if bias == "LONG":
+                take_profit = round(entry_price + atr * tp_mul * 2, 8)
+                stop_loss   = round(entry_price - atr * sl_mul,     8)
+            else:
+                take_profit = round(entry_price - atr * tp_mul * 2, 8)
+                stop_loss   = round(entry_price + atr * sl_mul,     8)
+
+    # ── 3. Criar log e executar ───────────────────────────────────────────────
+    side = "Buy" if bias == "LONG" else "Sell"
+
+    log = TradeLog(
+        user_id         = user["uid"],
+        exchange_key_id = req.exchange_key_id,
+        exchange        = key.exchange,
+        trade_mode      = req.trade_mode,
+        pair            = pair,
+        side            = side,
+        order_type      = "Market",
+        take_profit     = take_profit,
+        stop_loss       = stop_loss,
+        leverage        = req.leverage if req.trade_mode == "futures" else 1,
+        status          = "pending",
+        triggered_by    = "ai_auto",
+    )
+    db.add(log)
+    await db.commit()
+    await db.refresh(log)
+
+    try:
+        result = await place_order(
+            exchange        = key.exchange,
+            api_key         = key.api_key,
+            api_secret      = _decrypt_secret(key.api_secret_enc),
+            testnet         = key.testnet,
+            trade_mode      = req.trade_mode,
+            pair            = pair,
+            side            = side,
+            order_size_usdt = req.order_size_usdt,
+            leverage        = req.leverage if req.trade_mode == "futures" else 1,
+            order_type      = "Market",
+            take_profit     = take_profit,
+            stop_loss       = stop_loss,
+        )
+        log.status   = "filled"
+        log.order_id = result.get("order_id", "")
+        log.qty      = result.get("qty", 0)
+        log.price    = result.get("price", entry_price)
+        await db.commit()
+
+        logger.info(
+            f"AI-RUN executed: user={user['uid']} {pair} {bias} "
+            f"mode={req.trade_mode} conf={confidence}% tf={req.timeframe} "
+            f"order={log.order_id}"
+        )
+
+        return {
+            "executed":     True,
+            "order_id":     log.order_id,
+            "pair":         pair,
+            "bias":         bias,
+            "side":         side,
+            "confidence":   confidence,
+            "timeframe":    req.timeframe,
+            "trade_mode":   req.trade_mode,
+            "price":        log.price,
+            "qty":          log.qty,
+            "take_profit":  take_profit,
+            "stop_loss":    stop_loss,
+            "leverage":     log.leverage,
+            "risk_profile": req.risk_profile,
+            "signal":       {
+                "pair":       pair,
+                "bias":       bias,
+                "confidence": confidence,
+                "analysis":   best.get("analysis", ""),
+                "entry":      entry_price,
+            },
+        }
+
+    except HTTPException as e:
+        log.status    = "failed"
+        log.error_msg = e.detail
+        await db.commit()
+        logger.error(f"AI-RUN failed: user={user['uid']} {pair} {bias}: {e.detail}")
+        raise HTTPException(400, f"Ordem falhou: {e.detail}")
+
+    except Exception as e:
+        log.status    = "failed"
+        log.error_msg = str(e)
+        await db.commit()
+        logger.error(f"AI-RUN unexpected error: user={user['uid']} {pair}: {e}")
+        raise HTTPException(500, f"Erro inesperado: {str(e)}")
