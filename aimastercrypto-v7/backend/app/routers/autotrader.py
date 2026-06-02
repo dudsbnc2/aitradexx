@@ -1124,3 +1124,207 @@ async def list_trades(user=Depends(get_current_user), db: AsyncSession = Depends
         }
         for t in result.scalars().all()
     ]
+
+
+# ── Pydantic model for /ai-run ─────────────────────────────────────────────
+
+class AIRunRequest(BaseModel):
+    exchange_key_id: int
+    trade_mode:      Literal["spot", "futures"] = "spot"
+    pair:            Optional[str]   = None          # None = AI escolhe o melhor par
+    timeframe:       str             = "1H"
+    order_size_usdt: float           = Field(10.0, gt=0)
+    leverage:        int             = Field(1, ge=1, le=125)
+    risk_profile:    str             = "balanced"
+    min_confidence:  int             = Field(70, ge=0, le=100)
+
+
+@router.post("/ai-run")
+async def ai_run(
+    req: AIRunRequest,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Analisa o mercado com IA e executa uma ordem se o sinal for suficientemente forte.
+
+    Fluxo:
+    1. Valida a exchange key do utilizador.
+    2. Se `pair` for fornecido → analisa apenas esse par.
+       Se `pair` for omitido  → faz scan dos top pares e escolhe o melhor sinal.
+    3. Se bias=LONG|SHORT e confidence >= min_confidence → executa a ordem.
+    4. Devolve o resultado ao frontend (executed, pair, bias, confidence, price, …).
+    """
+    from app.services.signal_service import run_signal, run_scan
+    from app.services.data_fetcher import SCAN_PAIRS
+
+    # Spot não suporta leverage
+    if req.trade_mode == "spot" and req.leverage > 1:
+        raise HTTPException(400, "Spot não suporta leverage. Define leverage=1 ou usa modo futures.")
+
+    # Validar timeframe
+    valid_tfs = FUTURES_TIMEFRAMES if req.trade_mode == "futures" else SPOT_TIMEFRAMES
+    if req.timeframe not in valid_tfs:
+        raise HTTPException(
+            400,
+            f"Timeframe '{req.timeframe}' inválido para modo {req.trade_mode}. Válidos: {valid_tfs}",
+        )
+
+    # Verificar que a key pertence ao utilizador
+    key_res = await db.execute(
+        select(ExchangeKey).where(
+            ExchangeKey.id      == req.exchange_key_id,
+            ExchangeKey.user_id == user["uid"],
+            ExchangeKey.is_active == True,
+        )
+    )
+    key = key_res.scalar_one_or_none()
+    if not key:
+        raise HTTPException(403, "Exchange key não encontrada ou inativa.")
+
+    # ── 1. Obter sinal de IA ───────────────────────────────────────────────
+    try:
+        if req.pair:
+            # Sinal para par específico
+            signal = await run_signal(req.pair, req.timeframe, use_mtf=True, user_id=user["uid"])
+            signal.setdefault("pair", req.pair)
+            scanned = 1
+        else:
+            # Scan automático — escolhe o melhor par com sinal LONG/SHORT
+            scan = await run_scan(SCAN_PAIRS, timeframe=req.timeframe, use_mtf=True)
+            scanned = scan.get("scanned", len(SCAN_PAIRS))
+            best = scan.get("best")
+            if not best or best.get("bias") not in ("LONG", "SHORT"):
+                return {
+                    "executed":   False,
+                    "reason":     "Nenhum sinal adequado encontrado neste momento.",
+                    "scanned":    scanned,
+                    "timeframe":  req.timeframe,
+                    "trade_mode": req.trade_mode,
+                }
+            signal = best
+    except Exception as e:
+        logger.error(f"ai-run signal error user={user['uid']}: {e}")
+        raise HTTPException(500, f"Erro ao obter sinal de IA: {e}")
+
+    bias       = signal.get("bias", "WAIT")
+    confidence = int(signal.get("confidence", 0))
+    pair       = signal.get("pair") or req.pair or ""
+    take_profit = float(signal.get("takeProfit") or signal.get("take_profit") or 0) or None
+    stop_loss   = float(signal.get("stopLoss")   or signal.get("stop_loss")   or 0) or None
+
+    # ── 2. Verificar se o sinal é suficientemente forte ───────────────────
+    if bias not in ("LONG", "SHORT"):
+        return {
+            "executed":   False,
+            "bias":       bias,
+            "confidence": confidence,
+            "pair":       pair,
+            "reason":     f"Sinal WAIT — sem setup adequado (confiança: {confidence}%).",
+            "scanned":    scanned if not req.pair else 1,
+            "signal":     signal,
+            "timeframe":  req.timeframe,
+            "trade_mode": req.trade_mode,
+        }
+
+    if confidence < req.min_confidence:
+        return {
+            "executed":   False,
+            "bias":       bias,
+            "confidence": confidence,
+            "pair":       pair,
+            "reason":     f"Confiança {confidence}% abaixo do mínimo {req.min_confidence}%.",
+            "scanned":    scanned if not req.pair else 1,
+            "signal":     signal,
+            "timeframe":  req.timeframe,
+            "trade_mode": req.trade_mode,
+        }
+
+    # ── 3. Executar a ordem ───────────────────────────────────────────────
+    side = "Buy" if bias == "LONG" else "Sell"
+    execute_req = ExecuteOrderRequest(
+        exchange_key_id = req.exchange_key_id,
+        trade_mode      = req.trade_mode,
+        pair            = pair,
+        side            = side,
+        order_size_usdt = req.order_size_usdt,
+        leverage        = req.leverage if req.trade_mode == "futures" else 1,
+        order_type      = "Market",
+        # TP/SL apenas em futures
+        take_profit     = take_profit if req.trade_mode == "futures" else None,
+        stop_loss       = stop_loss   if req.trade_mode == "futures" else None,
+    )
+
+    log = TradeLog(
+        user_id         = user["uid"],
+        exchange_key_id = req.exchange_key_id,
+        exchange        = key.exchange,
+        trade_mode      = req.trade_mode,
+        pair            = pair,
+        side            = side,
+        order_type      = "Market",
+        take_profit     = execute_req.take_profit,
+        stop_loss       = execute_req.stop_loss,
+        leverage        = execute_req.leverage,
+        status          = "pending",
+        triggered_by    = "ai_run",
+        signal_id       = signal.get("signal_id"),
+    )
+    db.add(log)
+    await db.flush()
+
+    try:
+        result_data = await _execute_order(key, execute_req)
+        log.order_id = result_data["order_id"]
+        log.qty      = result_data["qty"]
+        log.price    = result_data["price"]
+        log.status   = "filled"
+        await db.commit()
+
+        logger.info(
+            f"ai-run OK: {pair} {side} {req.trade_mode} "
+            f"qty={result_data['qty']} price={result_data['price']} "
+            f"user={user['uid']} confidence={confidence}"
+        )
+
+        # Notificação Telegram (não bloqueante)
+        try:
+            await _notify_auto_trade(
+                user["uid"], key.exchange, req.trade_mode, pair, side,
+                req.order_size_usdt, execute_req.take_profit, execute_req.stop_loss,
+                "filled",
+            )
+        except Exception as e:
+            logger.warning(f"Telegram notify failed: {e}")
+
+        return {
+            "executed":    True,
+            "pair":        pair,
+            "bias":        bias,
+            "side":        side,
+            "confidence":  confidence,
+            "trade_mode":  req.trade_mode,
+            "exchange":    key.exchange,
+            "order_id":    result_data["order_id"],
+            "qty":         result_data["qty"],
+            "price":       result_data["price"],
+            "take_profit": float(execute_req.take_profit or 0) or None,
+            "stop_loss":   float(execute_req.stop_loss   or 0) or None,
+            "leverage":    execute_req.leverage,
+            "signal":      signal,
+            "timeframe":   req.timeframe,
+            "scanned":     scanned if not req.pair else 1,
+        }
+
+    except HTTPException as e:
+        log.status    = "failed"
+        log.error_msg = e.detail
+        await db.commit()
+        raise
+
+    except Exception as e:
+        log.status    = "failed"
+        log.error_msg = str(e)
+        await db.commit()
+        logger.error(f"ai-run execute error {pair} user={user['uid']}: {e}")
+        raise HTTPException(500, f"Erro ao executar ordem: {e}")
