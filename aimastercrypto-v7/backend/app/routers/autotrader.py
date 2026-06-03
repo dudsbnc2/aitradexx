@@ -1157,7 +1157,7 @@ class AIRunRequest(BaseModel):
     order_size_usdt: float           = Field(10.0, gt=0)
     leverage:        int             = Field(1, ge=1, le=125)
     risk_profile:    str             = "balanced"
-    min_confidence:  int             = Field(70, ge=0, le=100)
+    min_confidence:  int             = Field(55, ge=0, le=100)
 
 
 @router.post("/ai-run")
