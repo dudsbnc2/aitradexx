@@ -611,9 +611,10 @@ async def _mexc_execute_futures(
     MEXC Futures (contrato USDT-M).
     side: OpenLong | OpenShort | CloseLong | CloseShort
     """
-    symbol = pair.replace("/", "_").replace("USDT", "_USDT")
-    if not symbol.endswith("_USDT"):
-        symbol = symbol.rstrip("USDT") + "_USDT"
+    # MEXC Futures usa BTC_USDT (underscore simples)
+    # pair pode ser 'BTC/USDT' ou 'BTCUSDT' ou 'BTC_USDT'
+    _base = pair.replace("/", "").replace("_", "").replace("USDT", "")
+    symbol = f"{_base}_USDT"
 
     # Definir leverage
     await _mexc_futures_request(
@@ -636,15 +637,17 @@ async def _mexc_execute_futures(
     # OpenLong = Buy, OpenShort = Sell
     open_type = 1 if side.lower() in ("buy", "long", "openlong") else 2
 
+    use_market = not limit_price  # se não há preço limite, usar Market
     body: dict = {
         "symbol":   symbol,
-        "price":    str(limit_price or price),
-        "vol":      str(int(qty)),
-        "side":     open_type,   # 1=OpenLong 2=OpenShort
-        "type":     1,           # 1=Market-ish (price limit)
-        "openType": 1,           # 1=isolated
+        "vol":      str(int(max(qty, 1))),
+        "side":     open_type,   # 1=OpenLong 2=OpenShort 3=CloseLong 4=CloseShort
+        "type":     5 if use_market else 1,  # 5=Market 1=Limit
+        "openType": 1,           # 1=isolated 2=cross
         "leverage": leverage,
     }
+    if not use_market:
+        body["price"] = str(limit_price)
     if take_profit:
         body["takeProfitPrice"] = str(take_profit)
     if stop_loss:
