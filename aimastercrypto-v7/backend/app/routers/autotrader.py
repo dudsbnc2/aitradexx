@@ -395,7 +395,8 @@ MEXC_BASE = "https://api.mexc.com"
 
 
 def _mexc_sign(api_secret: str, params: dict) -> str:
-    query = urllib.parse.urlencode(sorted(params.items()))
+    # MEXC V3 assina na ordem de inserção dos params (NÃO sorted)
+    query = urllib.parse.urlencode(list(params.items()))
     return hmaclib.new(api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
 
 
@@ -405,23 +406,33 @@ async def _mexc_request(
     params: dict | None = None,
     body: dict | None = None,
 ) -> dict:
-    """MEXC V3 Spot REST — assina params + body fields juntos."""
+    """MEXC V3 Spot REST — assinatura correcta para GET e POST."""
     url = f"{MEXC_BASE}{endpoint}"
     ts  = str(int(time.time() * 1000))
-    p   = dict(params or {})
-    # MEXC V3: para POST, os campos do body entram no query-string para efeitos de assinatura
-    if body:
-        p.update(body)
-    p["timestamp"]  = ts
-    p["signature"]  = _mexc_sign(api_secret, p)
-    headers = {"X-MEXC-APIKEY": api_key, "Content-Type": "application/json"}
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        if method.upper() == "GET":
+    if method.upper() == "GET":
+        # GET: todos os params + recvWindow + timestamp → assinar
+        p = dict(params or {})
+        p["recvWindow"] = "10000"
+        p["timestamp"]  = ts
+        p["signature"]  = _mexc_sign(api_secret, p)
+        headers = {"X-MEXC-APIKEY": api_key}
+
+        async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(url, params=p, headers=headers)
-        else:
-            # Enviar como query params (com assinatura) e body vazio — MEXC V3 aceita ambos
-            resp = await client.post(url, params=p, headers=headers)
+    else:
+        # POST: body fields + recvWindow + timestamp → assinar; query só com sig params
+        sign_dict = dict(body or {})
+        sign_dict.update(params or {})
+        sign_dict["recvWindow"] = "10000"
+        sign_dict["timestamp"]  = ts
+        signature = _mexc_sign(api_secret, sign_dict)
+        # Query string: recvWindow + timestamp + signature
+        query_params = {"recvWindow": "10000", "timestamp": ts, "signature": signature}
+        headers = {"X-MEXC-APIKEY": api_key, "Content-Type": "application/json"}
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, params=query_params, json=body or {}, headers=headers)
 
     # Raise on HTTP errors first so we always get a meaningful exception
     try:
@@ -612,19 +623,19 @@ async def _mexc_execute_futures(
     side: OpenLong | OpenShort | CloseLong | CloseShort
     """
     # MEXC Futures usa BTC_USDT (underscore simples)
-    # pair pode ser 'BTC/USDT', 'ETH-USDT', 'BTCUSDT' ou 'BTC_USDT'
-    _clean = pair.upper().replace("/", "").replace("-", "").replace("_", "")
-    if _clean.endswith("USDT"):
-        _clean = _clean[:-4]
-    symbol = f"{_clean}_USDT"
-    logger.info(f"MEXC FUTURES ORDER => symbol={symbol} pair_original={pair}")
+    # pair pode ser 'BTC/USDT' ou 'BTCUSDT' ou 'BTC_USDT'
+    _base = pair.replace("/", "").replace("_", "").replace("USDT", "")
+    symbol = f"{_base}_USDT"
 
-    # Definir leverage
-    await _mexc_futures_request(
-        "POST", "/api/v1/private/position/change_leverage",
-        api_key=api_key, api_secret=api_secret,
-        body={"symbol": symbol, "leverage": leverage, "openType": 1},
-    )
+    # Definir leverage (melhor-esforço — a MEXC aceita leverage na própria ordem)
+    try:
+        await _mexc_futures_request(
+            "POST", "/api/v1/private/position/change_leverage",
+            api_key=api_key, api_secret=api_secret,
+            body={"symbol": symbol, "leverage": leverage, "openType": 1, "positionId": 0},
+        )
+    except Exception as e:
+        logger.warning(f"MEXC change_leverage ignorado ({symbol}): {e} — leverage enviado na ordem")
 
     # Preço atual
     async with httpx.AsyncClient(timeout=10) as client:
@@ -635,7 +646,7 @@ async def _mexc_execute_futures(
     if not price:
         raise HTTPException(400, f"Par {pair} não encontrado na MEXC Futuros")
 
-    qty = max(1, int((order_size_usdt * leverage) / price))
+    qty = round((order_size_usdt * leverage) / price, 0)
 
     # OpenLong = Buy, OpenShort = Sell
     open_type = 1 if side.lower() in ("buy", "long", "openlong") else 2
@@ -643,7 +654,7 @@ async def _mexc_execute_futures(
     use_market = not limit_price  # se não há preço limite, usar Market
     body: dict = {
         "symbol":   symbol,
-        "vol":      str(qty),
+        "vol":      str(int(max(qty, 1))),
         "side":     open_type,   # 1=OpenLong 2=OpenShort 3=CloseLong 4=CloseShort
         "type":     5 if use_market else 1,  # 5=Market 1=Limit
         "openType": 1,           # 1=isolated 2=cross
