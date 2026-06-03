@@ -71,15 +71,21 @@ COOKIE_NAME = "aic_refresh"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30   # 30 dias
 COOKIE_PATH = "/"                      # path raiz — browser envia em todos os pedidos ao domínio
 
+# COOKIE_SECURE=false no Railway (ou dev local sem HTTPS próprio)
+# Em produção com domínio HTTPS, define COOKIE_SECURE=true
+import os as _os
+_COOKIE_SECURE = _os.environ.get("COOKIE_SECURE", "true").lower() not in ("false", "0", "no")
+_COOKIE_SAMESITE = "none" if _COOKIE_SECURE else "lax"
+
 
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     """Definir o cookie httpOnly de forma consistente."""
     response.set_cookie(
         key=COOKIE_NAME,
         value=refresh_token,
-        httponly=True,           # JS não consegue ler — protege contra XSS
-        secure=True,             # HTTPS only
-        samesite="none",          # lax em vez de strict — necessário para Railway cross-service
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite=_COOKIE_SAMESITE,
         max_age=COOKIE_MAX_AGE,
         path=COOKIE_PATH,
     )
@@ -90,8 +96,8 @@ def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(
         key=COOKIE_NAME,
         path=COOKIE_PATH,
-        samesite="none",
-        secure=True,
+        samesite=_COOKIE_SAMESITE,
+        secure=_COOKIE_SECURE,
     )
 
 
