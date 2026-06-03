@@ -612,9 +612,12 @@ async def _mexc_execute_futures(
     side: OpenLong | OpenShort | CloseLong | CloseShort
     """
     # MEXC Futures usa BTC_USDT (underscore simples)
-    # pair pode ser 'BTC/USDT' ou 'BTCUSDT' ou 'BTC_USDT'
-    _base = pair.replace("/", "").replace("_", "").replace("USDT", "")
-    symbol = f"{_base}_USDT"
+    # pair pode ser 'BTC/USDT', 'ETH-USDT', 'BTCUSDT' ou 'BTC_USDT'
+    _clean = pair.upper().replace("/", "").replace("-", "").replace("_", "")
+    if _clean.endswith("USDT"):
+        _clean = _clean[:-4]
+    symbol = f"{_clean}_USDT"
+    logger.info(f"MEXC FUTURES ORDER => symbol={symbol} pair_original={pair}")
 
     # Definir leverage
     await _mexc_futures_request(
@@ -632,7 +635,7 @@ async def _mexc_execute_futures(
     if not price:
         raise HTTPException(400, f"Par {pair} não encontrado na MEXC Futuros")
 
-    qty = round((order_size_usdt * leverage) / price, 0)
+    qty = max(1, int((order_size_usdt * leverage) / price))
 
     # OpenLong = Buy, OpenShort = Sell
     open_type = 1 if side.lower() in ("buy", "long", "openlong") else 2
@@ -640,7 +643,7 @@ async def _mexc_execute_futures(
     use_market = not limit_price  # se não há preço limite, usar Market
     body: dict = {
         "symbol":   symbol,
-        "vol":      str(int(max(qty, 1))),
+        "vol":      str(qty),
         "side":     open_type,   # 1=OpenLong 2=OpenShort 3=CloseLong 4=CloseShort
         "type":     5 if use_market else 1,  # 5=Market 1=Limit
         "openType": 1,           # 1=isolated 2=cross
