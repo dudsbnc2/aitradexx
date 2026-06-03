@@ -3,10 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Bot, Key, Wallet, AlertTriangle, Play, Square, Trash2, RefreshCw,
-  ChevronDown, CheckCircle, Shield, Zap, TrendingUp, TrendingDown,
-  Settings, ToggleLeft, ToggleRight, ExternalLink, Info, BarChart2,
-  Sparkles, Activity, Clock, Target, Search, Radio,
+  Bot, Key, Wallet, Play, Trash2, RefreshCw, ChevronDown,
+  CheckCircle, Shield, Zap, TrendingUp, TrendingDown,
+  ToggleLeft, ToggleRight, ExternalLink, Info, BarChart2,
+  Sparkles, Clock, Search, Radio, Square, AlertTriangle,
 } from 'lucide-react'
 import ActivityFeed from './ActivityFeed'
 import AccountStatusBar from './AccountStatusBar'
@@ -18,21 +18,30 @@ type TradeMode   = 'spot' | 'futures'
 type RiskProfile = 'conservative' | 'balanced' | 'aggressive'
 type BotStatus   = 'idle' | 'scanning' | 'executing' | 'done' | 'error'
 
-interface ExchangeKey  { id: number; exchange: string; label: string; testnet: boolean; api_key_preview: string }
-interface BalanceCoin  { coin: string; balance: string; available: string; usd_value: string }
-interface TradeLog     {
+interface ExchangeKey { id: number; exchange: string; label: string; testnet: boolean; api_key_preview: string }
+interface BalanceCoin { coin: string; balance: string; available: string; usd_value: string }
+interface TradeLog {
   id: number; pair: string; side: string; trade_mode: TradeMode; exchange: string
   qty: number; price: number; take_profit: number; stop_loss: number; leverage: number
   status: string; order_id: string; error_msg: string; created_at: string; triggered_by: string
 }
-interface AIRunResult  {
+interface AIRunResult {
   executed: boolean; reason?: string; pair?: string; bias?: string; side?: string
   confidence?: number; timeframe?: string; trade_mode?: string; price?: number
   qty?: number; take_profit?: number; stop_loss?: number; leverage?: number
-  order_id?: string; signal?: { analysis?: string; entry?: number }; scanned?: number
+  order_id?: string; signal?: { analysis?: string }; scanned?: number
 }
 
-const SPOT_TIMEFRAMES    = ['1m','5m','15m','30m','1H','4H','1D']
+// ── Pares disponíveis para Spot (os mais líquidos e suportados) ────────────────
+const SPOT_PAIRS = [
+  'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'BNB/USDT',
+  'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 'DOT/USDT',
+  'TON/USDT', 'SUI/USDT', 'APT/USDT', 'NEAR/USDT', 'UNI/USDT',
+  'ARB/USDT', 'OP/USDT', 'INJ/USDT', 'SEI/USDT', 'TIA/USDT',
+  'ENA/USDT', 'WIF/USDT', 'PEPE/USDT', 'BONK/USDT', 'SHIB/USDT',
+  'FET/USDT', 'RENDER/USDT', 'TAO/USDT', 'LDO/USDT', 'AAVE/USDT',
+]
+
 const FUTURES_TIMEFRAMES = ['1m','3m','5m','15m','30m','1H','2H','4H','6H','12H','1D']
 const LEVERAGE_PRESETS   = [1,2,3,5,10,20,25,50,75,100,125]
 
@@ -47,7 +56,7 @@ const EXCHANGES = [
   { id: 'mexc',  name: 'MEXC',  logo: '🔵', url: 'https://www.mexc.com/user/openapi',            testnetSupported: false },
 ]
 
-// ── Auth fetch with auto token refresh ────────────────────────────────────────
+// ── Auth fetch ────────────────────────────────────────────────────────────────
 async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
   const headers: Record<string,string> = {
@@ -73,7 +82,7 @@ async function authFetch(url: string, options: RequestInit = {}): Promise<Respon
   return res
 }
 
-// ── Small UI helpers ───────────────────────────────────────────────────────────
+// ── UI helpers ────────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string,string> = {
     filled:    'text-[#00ff88] bg-[#00ff88]/10 border-[#00ff88]/30',
@@ -90,35 +99,7 @@ function ExchangeBadge({ exchange }: { exchange: string }) {
   return <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono border border-[#1a3a5c] text-[#8ba3be]">{ex?.logo} {ex?.name || exchange.toUpperCase()}</span>
 }
 
-function SelectField({ label, value, onChange, options }: { label:string; value:string; onChange:(v:string)=>void; options:{value:string;label:string}[] }) {
-  return (
-    <div>
-      {label && <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">{label}</label>}
-      <div className="relative">
-        <select value={value} onChange={e => onChange(e.target.value)}
-          className="w-full appearance-none bg-[#0c1f35] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm text-[#e8f4ff] font-mono focus:outline-none focus:border-[#00d4ff]/50 pr-8">
-          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#3d5a73] pointer-events-none"/>
-      </div>
-    </div>
-  )
-}
-
-function InputField({ label, value, onChange, type='text', min, max, step, placeholder }: any) {
-  return (
-    <div>
-      <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">{label}</label>
-      <input type={type} value={value}
-        onChange={e => onChange(type==='number' ? parseFloat(e.target.value)||0 : e.target.value)}
-        min={min} max={max} step={step} placeholder={placeholder}
-        className="w-full bg-[#0c1f35] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm text-[#e8f4ff] font-mono focus:outline-none focus:border-[#00d4ff]/50 placeholder-[#3d5a73]"
-      />
-    </div>
-  )
-}
-
-// ── Bot Result Card ────────────────────────────────────────────────────────────
+// ── Bot Result Card (só para futuros) ─────────────────────────────────────────
 function BotResultCard({ status, result }: { status: BotStatus; result: AIRunResult|null }) {
   if (status === 'idle') return (
     <div className="flex flex-col items-center justify-center py-10 text-center space-y-3">
@@ -143,7 +124,7 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
       </div>
       <div>
         <div className="text-sm font-bold text-[#00d4ff]">A varrer o mercado...</div>
-        <div className="text-xs font-mono text-[#3d5a73] mt-1">A IA está a analisar todos os pares</div>
+        <div className="text-xs font-mono text-[#3d5a73] mt-1">A IA analisa todos os pares de futuros</div>
       </div>
       <div className="flex gap-1.5">
         {[0,1,2,3,4].map(i => (
@@ -165,7 +146,7 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
       </div>
       <div>
         <div className="text-sm font-bold text-[#ff9900]">A enviar ordem...</div>
-        <div className="text-xs font-mono text-[#3d5a73] mt-1">Sinal encontrado · A executar na exchange</div>
+        <div className="text-xs font-mono text-[#3d5a73] mt-1">Sinal encontrado · A abrir posição</div>
       </div>
     </div>
   )
@@ -174,13 +155,12 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
 
   if (result.executed) return (
     <motion.div initial={{ opacity:0, scale:0.97 }} animate={{ opacity:1, scale:1 }} className="space-y-4">
-      {/* Success header */}
       <div className="flex items-center gap-3 p-4 rounded-xl bg-[#00ff88]/8 border border-[#00ff88]/20">
         <div className="w-10 h-10 rounded-full bg-[#00ff88]/15 flex items-center justify-center flex-shrink-0">
           <CheckCircle size={20} className="text-[#00ff88]" />
         </div>
         <div>
-          <div className="text-sm font-bold text-[#00ff88]">Ordem executada com sucesso</div>
+          <div className="text-sm font-bold text-[#00ff88]">Posição aberta com sucesso</div>
           <div className="text-xs font-mono text-[#3d5a73] mt-0.5">
             {new Date().toLocaleString('pt-PT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}
           </div>
@@ -189,18 +169,14 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
           {result.bias==='LONG' ? '▲ LONG' : '▼ SHORT'}
         </div>
       </div>
-
-      {/* Stats grid */}
       <div className="grid grid-cols-2 gap-2">
         {[
-          { label:'Par',          value: result.pair,                       color:'#e8f4ff' },
-          { label:'Confiança IA', value: `${result.confidence}%`,           color:'#00d4ff' },
-          { label:'Preço entrada',value: `$${result.price?.toFixed(4)}`,    color:'#e8f4ff' },
-          { label:'Quantidade',   value: result.qty?.toFixed(5),            color:'#e8f4ff' },
-          { label:'Take Profit',  value: result.take_profit ? `$${result.take_profit.toFixed(4)}` : '—', color:'#00ff88' },
-          { label:'Stop Loss',    value: result.stop_loss   ? `$${result.stop_loss.toFixed(4)}`   : '—', color:'#ff4466' },
-          ...(result.leverage && result.leverage>1 ? [{ label:'Alavancagem', value:`${result.leverage}×`, color:'#ff9900' }] : []),
-          { label:'Timeframe',    value: result.timeframe,                  color:'#8ba3be' },
+          { label:'Par',           value: result.pair,                                    color:'#e8f4ff' },
+          { label:'Confiança IA',  value: `${result.confidence}%`,                        color:'#00d4ff' },
+          { label:'Preço entrada', value: `$${result.price?.toFixed(4)}`,                 color:'#e8f4ff' },
+          { label:'Alavancagem',   value: `${result.leverage ?? 1}×`,                     color:'#ff9900' },
+          { label:'Take Profit',   value: result.take_profit ? `$${result.take_profit.toFixed(4)}` : '—', color:'#00ff88' },
+          { label:'Stop Loss',     value: result.stop_loss   ? `$${result.stop_loss.toFixed(4)}`   : '—', color:'#ff4466' },
         ].map(item => (
           <div key={item.label} className="p-2.5 rounded-lg bg-[#0c1f35] border border-[#1a3a5c]">
             <div className="text-[10px] font-mono text-[#3d5a73] mb-0.5">{item.label}</div>
@@ -208,14 +184,10 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
           </div>
         ))}
       </div>
-
-      {/* Order ID */}
       <div className="p-2.5 rounded-lg bg-[#0c1f35] border border-[#1a3a5c]">
         <div className="text-[10px] font-mono text-[#3d5a73] mb-0.5">Order ID</div>
         <div className="text-[10px] font-mono text-[#8ba3be] break-all">{result.order_id}</div>
       </div>
-
-      {/* AI analysis */}
       {result.signal?.analysis && (
         <div className="p-3 rounded-lg bg-[#00d4ff]/5 border border-[#00d4ff]/15">
           <div className="text-[10px] font-mono text-[#00d4ff] mb-1">Análise IA</div>
@@ -225,7 +197,6 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
     </motion.div>
   )
 
-  // Not executed / error
   return (
     <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} className="space-y-3">
       <div className="flex items-center gap-3 p-4 rounded-xl bg-[#ffcc00]/5 border border-[#ffcc00]/20">
@@ -233,7 +204,7 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
           <Clock size={18} className="text-[#ffcc00]" />
         </div>
         <div>
-          <div className="text-sm font-bold text-[#ffcc00]">Sem ordem executada</div>
+          <div className="text-sm font-bold text-[#ffcc00]">Sem posição aberta</div>
           <div className="text-xs font-mono text-[#3d5a73] mt-0.5 leading-relaxed">{result.reason}</div>
         </div>
       </div>
@@ -244,9 +215,11 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
   )
 }
 
-// ── Main Component ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ══════════════════════════════════════════════════════════════════════════════
 export default function AutoTraderTab({ user }: { user: any }) {
-  const [section, setSection] = useState<'bot'|'manual'|'keys'|'history'>('bot')
+  const [section, setSection] = useState<'spot'|'futures'|'keys'|'history'>('spot')
 
   // Account
   const [keys, setKeys]               = useState<ExchangeKey[]>([])
@@ -255,44 +228,37 @@ export default function AutoTraderTab({ user }: { user: any }) {
   const [balLoading, setBalLoading]   = useState(false)
 
   // Connect form
-  const [selEx, setSelEx]       = useState('bybit')
-  const [apiKey, setApiKey]     = useState('')
-  const [apiSec, setApiSec]     = useState('')
-  const [keyLabel, setKeyLabel] = useState('Conta Principal')
-  const [testnet, setTestnet]   = useState(false)
+  const [selEx, setSelEx]           = useState('bybit')
+  const [apiKey, setApiKey]         = useState('')
+  const [apiSec, setApiSec]         = useState('')
+  const [keyLabel, setKeyLabel]     = useState('Conta Principal')
+  const [testnet, setTestnet]       = useState(false)
   const [connecting, setConnecting] = useState(false)
 
-  // Bot config
-  const [botMode,    setBotMode]    = useState<TradeMode>('spot')
+  // ── SPOT state ──────────────────────────────────────────────────────────────
+  const [spotPair,    setSpotPair]    = useState('BTC/USDT')
+  const [spotSize,    setSpotSize]    = useState(10)
+  const [spotSide,    setSpotSide]    = useState<'Buy'|'Sell'>('Buy')
+  const [spotConfirm, setSpotConfirm] = useState(false)
+  const [spotLoading, setSpotLoading] = useState(false)
+  const [spotPairSearch, setSpotPairSearch] = useState('')
+
+  // ── FUTURES BOT state ───────────────────────────────────────────────────────
   const [botTf,      setBotTf]      = useState('1H')
   const [botSize,    setBotSize]    = useState(10)
   const [botLev,     setBotLev]     = useState(10)
   const [botRisk,    setBotRisk]    = useState<RiskProfile>('balanced')
   const [botMinConf, setBotMinConf] = useState(70)
-  const [botPair,    setBotPair]    = useState('')
-
-  // Bot state
-  const [botStatus,    setBotStatus]    = useState<BotStatus>('idle')
-  const [botResult,    setBotResult]    = useState<AIRunResult|null>(null)
-  const [autoRepeat,   setAutoRepeat]   = useState(false)
-  const [lastBotRun,   setLastBotRun]   = useState<any>(null)
-  const autoRepeatRef  = useRef(autoRepeat)
-  const repeatTimer    = useRef<ReturnType<typeof setTimeout>|null>(null)
+  const [botStatus,  setBotStatus]  = useState<BotStatus>('idle')
+  const [botResult,  setBotResult]  = useState<AIRunResult|null>(null)
+  const [autoRepeat, setAutoRepeat] = useState(false)
+  const [lastBotRun, setLastBotRun] = useState<any>(null)
+  const autoRepeatRef = useRef(autoRepeat)
+  const repeatTimer   = useRef<ReturnType<typeof setTimeout>|null>(null)
   useEffect(() => { autoRepeatRef.current = autoRepeat }, [autoRepeat])
 
-  // Manual order
-  const [execMode,    setExecMode]    = useState<TradeMode>('spot')
-  const [execPair,    setExecPair]    = useState('BTC/USDT')
-  const [execSide,    setExecSide]    = useState<'Buy'|'Sell'>('Buy')
-  const [execSize,    setExecSize]    = useState(10)
-  const [execLev,     setExecLev]     = useState(10)
-  const [execTp,      setExecTp]      = useState('')
-  const [execSl,      setExecSl]      = useState('')
-  const [execConfirm, setExecConfirm] = useState(false)
-  const [execLoading, setExecLoading] = useState(false)
-
   // History
-  const [trades,      setTrades]      = useState<TradeLog[]>([])
+  const [trades, setTrades] = useState<TradeLog[]>([])
 
   useEffect(() => () => { if (repeatTimer.current) clearTimeout(repeatTimer.current) }, [])
 
@@ -314,22 +280,9 @@ export default function AutoTraderTab({ user }: { user: any }) {
       if (r.ok) {
         const d = await r.json()
         setBalance(d.coins)
-        const usdt = d.coins?.find((c: BalanceCoin) => c.coin === 'USDT')
+        const usdt  = d.coins?.find((c: BalanceCoin) => c.coin === 'USDT')
         const total = d.coins?.reduce((s: number, c: BalanceCoin) => s + parseFloat(c.usd_value||'0'), 0) || 0
-        const modeLabel = mode === 'futures' ? 'Futuros (Contract)' : 'Spot'
-        if (usdt) {
-          logInfo(
-            `Saldo ${modeLabel} actualizado`,
-            `USDT: $${parseFloat(usdt.balance).toFixed(2)} · Total: $${total.toFixed(2)}`
-          )
-        } else if (d.coins?.length > 0) {
-          logInfo(
-            `Saldo ${modeLabel} actualizado`,
-            `${d.coins.length} moedas · Total: $${total.toFixed(2)}`
-          )
-        } else {
-          logWarning(`Wallet ${modeLabel} vazia`, 'Sem saldo disponível nesta carteira')
-        }
+        if (usdt) logInfo(`Saldo actualizado`, `USDT: $${parseFloat(usdt.balance).toFixed(2)} · Total: $${total.toFixed(2)}`)
       }
     } catch {}
     finally { setBalLoading(false) }
@@ -340,24 +293,13 @@ export default function AutoTraderTab({ user }: { user: any }) {
   }, [])
 
   useEffect(() => { loadKeys(); loadTrades() }, [])
-  // Recarregar saldo quando muda a conta OU o modo activo
-  useEffect(() => { if (selectedKey) loadBalance(selectedKey, botMode) }, [selectedKey])
-  // Recarregar quando muda o modo no bot
-  useEffect(() => { if (selectedKey) loadBalance(selectedKey, botMode) }, [botMode])
-  // Recarregar quando muda o modo no manual
-  useEffect(() => { if (selectedKey) loadBalance(selectedKey, execMode) }, [execMode])
+  useEffect(() => { if (selectedKey) loadBalance(selectedKey, section === 'futures' ? 'futures' : 'spot') }, [selectedKey])
+  useEffect(() => { if (selectedKey) loadBalance(selectedKey, section === 'futures' ? 'futures' : 'spot') }, [section])
 
-  // Auto-log when key is selected
   useEffect(() => {
     if (selectedKey && keys.length) {
       const k = keys.find(k => k.id === selectedKey)
-      if (k) {
-        const ex = EXCHANGES.find(e => e.id === k.exchange)
-        logSuccess(
-          `Conta activa: ${k.label}`,
-          `${ex?.name || k.exchange}${k.testnet ? ' · TESTNET' : ''} · A carregar saldo...`
-        )
-      }
+      if (k) logSuccess(`Conta activa: ${k.label}`, `${EXCHANGES.find(e=>e.id===k.exchange)?.name}${k.testnet?' · TESTNET':''}`)
     }
   }, [selectedKey])
 
@@ -365,7 +307,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
   async function connectKey() {
     if (!apiKey || !apiSec) return logError('Preenche a API Key e Secret')
     setConnecting(true)
-    logAction('A conectar exchange...', `${EXCHANGES.find(e=>e.id===selEx)?.name} "${keyLabel}"`)
     try {
       const r = await authFetch(`${API}/api/autotrader/connect`, {
         method: 'POST',
@@ -373,11 +314,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.detail || 'Erro ao conectar')
-      const ex = EXCHANGES.find(e => e.id === selEx)
-      logSuccess(
-        `${ex?.logo} ${ex?.name} conectada com sucesso!`,
-        `Conta "${keyLabel}"${testnet ? ' (Testnet)' : ''} · A verificar saldo...`
-      )
+      logSuccess(`${EXCHANGES.find(e=>e.id===selEx)?.name} conectada!`, `Conta "${keyLabel}"`)
       setApiKey(''); setApiSec('')
       await loadKeys()
     } catch (e: any) {
@@ -393,69 +330,82 @@ export default function AutoTraderTab({ user }: { user: any }) {
     if (selectedKey === id) { setSelectedKey(null); setBalance(null) }
   }
 
-  // ── Bot run ───────────────────────────────────────────────────────────────────
+  // ── SPOT execute ─────────────────────────────────────────────────────────────
+  async function executeSpot() {
+    if (!selectedKey) return logError('Seleciona uma conta primeiro', 'Vai ao separador Contas')
+    if (!spotConfirm) return logError('Confirma a ordem antes de executar')
+    setSpotLoading(true); setSpotConfirm(false)
+    const dirLabel = spotSide === 'Buy' ? 'COMPRAR' : 'VENDER'
+    logAction(`${dirLabel} ${spotPair}`, `$${spotSize} USDT`)
+    try {
+      const r = await authFetch(`${API}/api/autotrader/execute`, {
+        method: 'POST',
+        body: JSON.stringify({
+          exchange_key_id: selectedKey,
+          trade_mode:      'spot',
+          pair:            spotPair,
+          side:            spotSide,
+          order_size_usdt: spotSize,
+          leverage:        1,
+          order_type:      'Market',
+        }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.detail || JSON.stringify(d))
+      logSuccess(
+        `${dirLabel} ${spotPair} executado!`,
+        `Preço: $${d.price?.toFixed?.(4) ?? '—'} · Order ID: ${d.order_id}`
+      )
+      await loadTrades()
+      if (selectedKey) await loadBalance(selectedKey, 'spot')
+    } catch (e: any) {
+      logError(`Falha ao ${dirLabel} ${spotPair}`, e.message)
+    } finally { setSpotLoading(false) }
+  }
+
+  // ── FUTURES BOT run ──────────────────────────────────────────────────────────
   async function runBot() {
     if (!selectedKey) return logError('Seleciona uma conta primeiro', 'Vai ao separador Contas')
     if (botStatus === 'scanning' || botStatus === 'executing') return
-
-    setBotResult(null)
-    setBotStatus('scanning')
-    const pairLabel = botPair || 'todos os pares'
-    logAction(
-      'Bot IA iniciado',
-      `Modo: ${botMode.toUpperCase()} · ${botTf} · ${pairLabel} · Confiança mín: ${botMinConf}%`
-    )
-
+    setBotResult(null); setBotStatus('scanning')
+    logAction('Bot IA iniciado', `Futuros · ${botTf} · Confiança mín: ${botMinConf}%`)
     try {
-      const body: any = {
-        exchange_key_id: selectedKey,
-        trade_mode:      botMode,
-        timeframe:       botTf,
-        order_size_usdt: botSize,
-        leverage:        botMode === 'spot' ? 1 : botLev,
-        risk_profile:    botRisk,
-        min_confidence:  botMinConf,
-      }
-      if (botPair) body.pair = botPair
-
-      logInfo('A analisar mercado com IA...', `Perfil de risco: ${botRisk}`)
-      setBotStatus('scanning')
-
       const r = await authFetch(`${API}/api/autotrader/ai-run`, {
-        method: 'POST', body: JSON.stringify(body),
+        method: 'POST',
+        body: JSON.stringify({
+          exchange_key_id: selectedKey,
+          trade_mode:      'futures',
+          timeframe:       botTf,
+          order_size_usdt: botSize,
+          leverage:        botLev,
+          risk_profile:    botRisk,
+          min_confidence:  botMinConf,
+        }),
       })
       const d: AIRunResult = await r.json()
       if (!r.ok) throw new Error((d as any).detail || JSON.stringify(d))
 
       if (d.executed) {
         setBotStatus('executing')
-        // Small delay to show "executing" state
         await new Promise(res => setTimeout(res, 800))
-        setBotStatus('done')
-        setBotResult(d)
+        setBotStatus('done'); setBotResult(d)
         setLastBotRun({ ts: new Date(), pair: d.pair, bias: d.bias, confidence: d.confidence, executed: true })
         logSuccess(
-          `Ordem executada: ${d.bias} ${d.pair}`,
+          `Posição aberta: ${d.bias} ${d.pair}`,
           `Confiança: ${d.confidence}% · Preço: $${d.price?.toFixed(4)} · TP: $${d.take_profit?.toFixed(4) ?? '—'} · SL: $${d.stop_loss?.toFixed(4) ?? '—'}`
         )
-        logInfo('Order ID', d.order_id)
         await loadTrades()
-        if (selectedKey) await loadBalance(selectedKey, botMode)
+        if (selectedKey) await loadBalance(selectedKey, 'futures')
       } else {
-        setBotStatus('done')
-        setBotResult(d)
+        setBotStatus('done'); setBotResult(d)
         setLastBotRun({ ts: new Date(), pair: '', bias: '', confidence: 0, executed: false })
-        logWarning(
-          'Sem sinal adequado neste momento',
-          d.reason || `Analisados ${d.scanned ?? '—'} pares`
-        )
+        logWarning('Sem sinal adequado neste momento', d.reason || `Analisados ${d.scanned ?? '—'} pares`)
       }
     } catch (e: any) {
       setBotStatus('error')
       setBotResult({ executed: false, reason: e.message })
       logError('Erro ao executar bot', e.message)
     }
-
     if (autoRepeatRef.current) {
       logInfo('Repetição automática activa', 'Próxima análise em 5 minutos')
       repeatTimer.current = setTimeout(() => { if (autoRepeatRef.current) runBot() }, 5 * 60 * 1000)
@@ -464,49 +414,8 @@ export default function AutoTraderTab({ user }: { user: any }) {
 
   function stopBot() {
     if (repeatTimer.current) clearTimeout(repeatTimer.current)
-    setAutoRepeat(false)
-    setBotStatus('idle')
+    setAutoRepeat(false); setBotStatus('idle')
     logWarning('Bot parado pelo utilizador')
-  }
-
-  // ── Manual order ──────────────────────────────────────────────────────────────
-  async function executeManual() {
-    if (!selectedKey) return logError('Seleciona uma conta primeiro')
-    if (!execConfirm) return logError('Confirma a ordem antes de executar')
-    setExecLoading(true); setExecConfirm(false)
-
-    const dirLabel = execMode === 'futures'
-      ? (execSide === 'Buy' ? 'LONG' : 'SHORT')
-      : (execSide === 'Buy' ? 'COMPRAR' : 'VENDER')
-    logAction(`Ordem manual: ${dirLabel} ${execPair}`, `$${execSize} USDT${execMode==='futures' ? ` · ${execLev}×` : ''}`)
-
-    try {
-      const body: any = {
-        exchange_key_id: selectedKey,
-        trade_mode:      execMode,
-        pair:            execPair,
-        side:            execSide,
-        order_size_usdt: execSize,
-        leverage:        execMode === 'spot' ? 1 : execLev,
-        order_type:      'Market',
-      }
-      if (execMode === 'futures' && execTp) body.take_profit = parseFloat(execTp)
-      if (execMode === 'futures' && execSl) body.stop_loss   = parseFloat(execSl)
-
-      const r = await authFetch(`${API}/api/autotrader/execute`, {
-        method: 'POST', body: JSON.stringify(body),
-      })
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.detail || JSON.stringify(d))
-      logSuccess(
-        `${dirLabel} ${execPair} executado!`,
-        `Order ID: ${d.order_id} · Preço: $${d.price?.toFixed?.(4) ?? '—'}`
-      )
-      await loadTrades()
-      if (selectedKey) await loadBalance(selectedKey)
-    } catch (e: any) {
-      logError(`Falha ao executar ${dirLabel} ${execPair}`, e.message)
-    } finally { setExecLoading(false) }
   }
 
   if (!user) return (
@@ -516,28 +425,28 @@ export default function AutoTraderTab({ user }: { user: any }) {
     </div>
   )
 
-  const selectedKeyObj  = keys.find(k => k.id === selectedKey)
-  const botTimeframes   = botMode   === 'futures' ? FUTURES_TIMEFRAMES : SPOT_TIMEFRAMES
-  const botRunning      = botStatus === 'scanning' || botStatus === 'executing'
+  const selectedKeyObj = keys.find(k => k.id === selectedKey)
+  const botRunning     = botStatus === 'scanning' || botStatus === 'executing'
+  const filteredPairs  = SPOT_PAIRS.filter(p => p.toLowerCase().includes(spotPairSearch.toLowerCase()))
 
   return (
     <div className="space-y-4 mt-1">
 
-      {/* ── Nav ─────────────────────────────────────────────────────────────── */}
+      {/* ── Nav ──────────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-lg font-bold flex items-center gap-2">
             <Bot size={20} className="text-[#00d4ff]" /> Auto Trade
             <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-[#ffcc00]/10 text-[#ffcc00] border border-[#ffcc00]/30">BETA</span>
           </h1>
-          <div className="text-xs font-mono text-[#3d5a73]">A IA analisa · escolhe · executa autonomamente</div>
+          <div className="text-xs font-mono text-[#3d5a73]">Spot · Futuros com IA · Histórico</div>
         </div>
         <div className="flex gap-2 flex-wrap">
           {([
-            { id:'bot',     label:'🤖 Bot IA'   },
-            { id:'manual',  label:'⚡ Manual'   },
-            { id:'keys',    label:'🔑 Contas'   },
-            { id:'history', label:'📋 Histórico'},
+            { id:'spot',    label:'💰 Spot'       },
+            { id:'futures', label:'⚡ Futuros IA'  },
+            { id:'keys',    label:'🔑 Contas'      },
+            { id:'history', label:'📋 Histórico'   },
           ] as const).map(s => (
             <button key={s.id} onClick={() => setSection(s.id)}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all border ${section===s.id ? 'bg-[#00d4ff]/10 text-[#00d4ff] border-[#00d4ff]/20' : 'text-[#8ba3be] border-[#1a3a5c] hover:border-[#00d4ff]/20'}`}>
@@ -547,82 +456,268 @@ export default function AutoTraderTab({ user }: { user: any }) {
         </div>
       </div>
 
-      {/* ── Account Status Bar — always visible ─────────────────────────────── */}
+      {/* ── Account Status Bar ───────────────────────────────────────────────── */}
       <AccountStatusBar
         keyId={selectedKey}
         keyLabel={selectedKeyObj?.label || ''}
-        walletMode={section === 'manual' ? execMode : botMode}
+        walletMode={section === 'futures' ? 'futures' : 'spot'}
         exchange={selectedKeyObj?.exchange || ''}
         testnet={selectedKeyObj?.testnet || false}
         balance={balance}
         loading={balLoading}
-        onRefresh={() => selectedKey && loadBalance(selectedKey, section === 'manual' ? execMode : botMode)}
+        onRefresh={() => selectedKey && loadBalance(selectedKey, section === 'futures' ? 'futures' : 'spot')}
         lastBotRun={lastBotRun}
       />
 
-      {/* ── BOT ─────────────────────────────────────────────────────────────── */}
-      {section === 'bot' && (
+      {/* ════════════════════════════════════════════════════════════════════════
+          SPOT — Comprar e Vender moedas
+      ════════════════════════════════════════════════════════════════════════ */}
+      {section === 'spot' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* Config */}
-          <div className="glass-card p-5 space-y-4">
+          <div className="glass-card p-5 space-y-5">
+
+            {/* Cabeçalho */}
             <div className="flex items-center gap-2">
-              <Sparkles size={16} className="text-[#00d4ff]" />
-              <span className="text-sm font-bold">Configurar Bot IA</span>
-            </div>
-
-            <div className="p-3 rounded-xl bg-[#00d4ff]/5 border border-[#00d4ff]/15 text-xs font-mono text-[#8ba3be] leading-relaxed">
-              Carrega em <span className="text-[#00d4ff] font-bold">Executar Bot IA</span> — a IA varre todos os pares,
-              encontra o melhor sinal no timeframe escolhido, calcula TP/SL e executa sozinha.
-            </div>
-
-            {/* Spot / Futuros */}
-            <div className="flex gap-1 p-1 rounded-xl bg-[#0c1f35] border border-[#1a3a5c]">
-              {(['spot','futures'] as TradeMode[]).map(m => (
-                <button key={m} onClick={() => setBotMode(m)}
-                  className={`flex-1 py-2 rounded-lg text-xs font-bold font-mono transition-all flex items-center justify-center gap-1.5 ${
-                    botMode===m
-                      ? m==='futures' ? 'bg-[#ff9900]/20 text-[#ff9900] border border-[#ff9900]/30'
-                      : 'bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/30'
-                      : 'text-[#3d5a73] hover:text-[#8ba3be]'
-                  }`}>
-                  {m==='spot' ? '💰 SPOT' : '⚡ FUTUROS'}
-                </button>
-              ))}
-            </div>
-
-            <SelectField label="Timeframe (a IA analisa neste período)" value={botTf} onChange={setBotTf}
-              options={botTimeframes.map(t => ({ value:t, label:t }))} />
-
-            <InputField label="Tamanho da ordem (USDT)" value={botSize} onChange={setBotSize} type="number" min={1} step={1} />
-
-            {/* Alavancagem presets — só futuros */}
-            {botMode === 'futures' && (
+              <span className="text-xl">💰</span>
               <div>
-                <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Alavancagem</label>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {LEVERAGE_PRESETS.map(lev => (
-                    <button key={lev} onClick={() => setBotLev(lev)}
-                      className={`py-1.5 rounded-lg text-xs font-bold font-mono border transition-all ${
-                        botLev===lev ? 'bg-[#ff9900]/20 text-[#ff9900] border-[#ff9900]/40'
-                        : 'bg-[#0c1f35] text-[#3d5a73] border-[#1a3a5c] hover:border-[#ff9900]/30 hover:text-[#ff9900]/70'
-                      }`}>
-                      {lev}×
-                    </button>
-                  ))}
-                </div>
-                <div className="text-xs font-mono text-[#ff9900] mt-1 text-center">{botLev}× seleccionado</div>
+                <div className="text-sm font-bold">Spot — Comprar / Vender</div>
+                <div className="text-xs font-mono text-[#3d5a73]">Compra ou vende a moeda ao preço actual de mercado</div>
+              </div>
+            </div>
+
+            {!selectedKey && (
+              <div className="p-3 rounded-xl bg-[#ff4466]/5 border border-[#ff4466]/20 text-xs font-mono text-[#ff4466] flex items-center gap-2">
+                <AlertTriangle size={13} />
+                Conecta uma conta no separador <button onClick={() => setSection('keys')} className="underline ml-1">Contas</button>
               </div>
             )}
 
-            {/* Perfil risco */}
+            {/* Escolher par — botões clicáveis */}
             <div>
-              <label className="block text-xs font-mono text-[#3d5a73] mb-2">Perfil de Risco (TP/SL automático)</label>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-2">Moeda</label>
+              {/* Pesquisa rápida */}
+              <div className="relative mb-2">
+                <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3d5a73]" />
+                <input
+                  type="text"
+                  value={spotPairSearch}
+                  onChange={e => setSpotPairSearch(e.target.value.toUpperCase())}
+                  placeholder="Pesquisar..."
+                  className="w-full bg-[#0c1f35] border border-[#1a3a5c] rounded-lg pl-8 pr-3 py-2 text-xs text-[#e8f4ff] font-mono focus:outline-none focus:border-[#00d4ff]/50 placeholder-[#3d5a73]"
+                />
+              </div>
+              {/* Grid de pares */}
+              <div className="grid grid-cols-4 gap-1.5 max-h-44 overflow-y-auto pr-1">
+                {filteredPairs.map(pair => {
+                  const base = pair.split('/')[0]
+                  return (
+                    <button
+                      key={pair}
+                      onClick={() => setSpotPair(pair)}
+                      className={`py-2 px-1 rounded-lg text-[11px] font-bold font-mono border transition-all ${
+                        spotPair === pair
+                          ? 'bg-[#00d4ff]/15 text-[#00d4ff] border-[#00d4ff]/40'
+                          : 'bg-[#0c1f35] text-[#8ba3be] border-[#1a3a5c] hover:border-[#00d4ff]/30 hover:text-[#e8f4ff]'
+                      }`}>
+                      {base}
+                    </button>
+                  )
+                })}
+              </div>
+              {/* Par seleccionado */}
+              <div className="mt-2 text-center text-xs font-mono text-[#3d5a73]">
+                Seleccionado: <span className="text-[#00d4ff] font-bold">{spotPair}</span>
+              </div>
+            </div>
+
+            {/* Valor */}
+            <div>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Valor (USDT)</label>
+              <input
+                type="number" value={spotSize} min={1} step={1}
+                onChange={e => setSpotSize(parseFloat(e.target.value) || 0)}
+                className="w-full bg-[#0c1f35] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm text-[#e8f4ff] font-mono focus:outline-none focus:border-[#00d4ff]/50"
+              />
+              {/* Atalhos rápidos */}
+              <div className="flex gap-1.5 mt-2">
+                {[10, 25, 50, 100, 250].map(v => (
+                  <button key={v} onClick={() => setSpotSize(v)}
+                    className={`flex-1 py-1 rounded text-[10px] font-bold font-mono border transition-all ${
+                      spotSize === v ? 'bg-[#00d4ff]/15 text-[#00d4ff] border-[#00d4ff]/40' : 'bg-[#0c1f35] text-[#3d5a73] border-[#1a3a5c] hover:border-[#00d4ff]/30'
+                    }`}>
+                    ${v}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Comprar / Vender */}
+            <div>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Operação</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setSpotSide('Buy')}
+                  className={`py-3 rounded-xl text-sm font-bold font-mono border transition-all flex items-center justify-center gap-2 ${
+                    spotSide === 'Buy'
+                      ? 'bg-[#00ff88]/15 text-[#00ff88] border-[#00ff88]/40'
+                      : 'text-[#3d5a73] border-[#1a3a5c] hover:border-[#00ff88]/30'
+                  }`}>
+                  <TrendingUp size={15} /> COMPRAR
+                </button>
+                <button onClick={() => setSpotSide('Sell')}
+                  className={`py-3 rounded-xl text-sm font-bold font-mono border transition-all flex items-center justify-center gap-2 ${
+                    spotSide === 'Sell'
+                      ? 'bg-[#ff4466]/15 text-[#ff4466] border-[#ff4466]/40'
+                      : 'text-[#3d5a73] border-[#1a3a5c] hover:border-[#ff4466]/30'
+                  }`}>
+                  <TrendingDown size={15} /> VENDER
+                </button>
+              </div>
+            </div>
+
+            {/* Resumo + Confirmação */}
+            <div className="p-3 rounded-xl bg-[#0c1f35] border border-[#1a3a5c] space-y-1.5 text-xs font-mono">
+              <div className="flex justify-between">
+                <span className="text-[#3d5a73]">Moeda</span>
+                <span className="font-bold text-[#e8f4ff]">{spotPair}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#3d5a73]">Operação</span>
+                <span className={`font-bold ${spotSide === 'Buy' ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>
+                  {spotSide === 'Buy' ? '▲ COMPRAR' : '▼ VENDER'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#3d5a73]">Valor</span>
+                <span className="font-bold">${spotSize} USDT</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#3d5a73]">Tipo</span>
+                <span className="text-[#8ba3be]">Mercado (imediato)</span>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <div onClick={() => setSpotConfirm(!spotConfirm)}
+                className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${spotConfirm ? 'bg-[#00ff88] border-[#00ff88]' : 'border-[#3d5a73]'}`}>
+                {spotConfirm && <span className="text-[#020b14] text-[10px] font-bold">✓</span>}
+              </div>
+              <span className="text-xs font-mono text-[#8ba3be]">Confirmo que quero executar esta ordem com dinheiro real</span>
+            </label>
+
+            <button onClick={executeSpot} disabled={!selectedKey || !spotConfirm || spotLoading}
+              className={`w-full py-3.5 rounded-xl text-sm font-bold font-mono border transition-all flex items-center justify-center gap-2 disabled:opacity-40 ${
+                spotSide === 'Buy'
+                  ? 'bg-[#00ff88]/15 text-[#00ff88] border-[#00ff88]/40 hover:bg-[#00ff88]/25'
+                  : 'bg-[#ff4466]/15 text-[#ff4466] border-[#ff4466]/40 hover:bg-[#ff4466]/25'
+              }`}>
+              {spotLoading ? <RefreshCw size={15} className="animate-spin" /> : <Play size={15} />}
+              {spotSide === 'Buy' ? `COMPRAR ${spotPair}` : `VENDER ${spotPair}`}
+            </button>
+
+            {/* Nota informativa */}
+            <div className="p-3 rounded-xl bg-[#00d4ff]/5 border border-[#00d4ff]/10 flex items-start gap-2">
+              <Info size={13} className="text-[#00d4ff] flex-shrink-0 mt-0.5" />
+              <div className="text-[10px] font-mono text-[#3d5a73] leading-relaxed">
+                Spot compra a moeda directamente. Podes vender aqui ou na tua exchange quando quiseres.
+                Para análise automática com IA e LONG/SHORT, usa os <button onClick={() => setSection('futures')} className="text-[#00d4ff] underline">Futuros</button>.
+              </div>
+            </div>
+          </div>
+
+          {/* Activity feed */}
+          <div className="space-y-4">
+            <ActivityFeed maxVisible={14} />
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          FUTUROS — Bot IA com scan automático
+      ════════════════════════════════════════════════════════════════════════ */}
+      {section === 'futures' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+          {/* Config */}
+          <div className="glass-card p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-[#ff9900]" />
+              <div>
+                <div className="text-sm font-bold">Bot IA — Futuros</div>
+                <div className="text-xs font-mono text-[#3d5a73]">A IA varre todos os pares, escolhe o melhor sinal e entra sozinha</div>
+              </div>
+            </div>
+
+            {!selectedKey && (
+              <div className="p-3 rounded-xl bg-[#ff4466]/5 border border-[#ff4466]/20 text-xs font-mono text-[#ff4466] flex items-center gap-2">
+                <AlertTriangle size={13} />
+                Conecta uma conta no separador <button onClick={() => setSection('keys')} className="underline ml-1">Contas</button>
+              </div>
+            )}
+
+            {/* Timeframe */}
+            <div>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Timeframe</label>
+              <div className="grid grid-cols-6 gap-1.5">
+                {FUTURES_TIMEFRAMES.map(tf => (
+                  <button key={tf} onClick={() => setBotTf(tf)}
+                    className={`py-1.5 rounded-lg text-[11px] font-bold font-mono border transition-all ${
+                      botTf === tf
+                        ? 'bg-[#ff9900]/20 text-[#ff9900] border-[#ff9900]/40'
+                        : 'bg-[#0c1f35] text-[#3d5a73] border-[#1a3a5c] hover:border-[#ff9900]/30 hover:text-[#ff9900]/70'
+                    }`}>
+                    {tf}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Tamanho da ordem */}
+            <div>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Tamanho da ordem (USDT)</label>
+              <input type="number" value={botSize} min={1} step={1}
+                onChange={e => setBotSize(parseFloat(e.target.value) || 0)}
+                className="w-full bg-[#0c1f35] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm text-[#e8f4ff] font-mono focus:outline-none focus:border-[#ff9900]/50"
+              />
+              <div className="flex gap-1.5 mt-2">
+                {[10, 25, 50, 100, 250].map(v => (
+                  <button key={v} onClick={() => setBotSize(v)}
+                    className={`flex-1 py-1 rounded text-[10px] font-bold font-mono border transition-all ${
+                      botSize === v ? 'bg-[#ff9900]/15 text-[#ff9900] border-[#ff9900]/40' : 'bg-[#0c1f35] text-[#3d5a73] border-[#1a3a5c] hover:border-[#ff9900]/30'
+                    }`}>
+                    ${v}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Alavancagem */}
+            <div>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">
+                Alavancagem <span className="text-[#ff9900]">{botLev}×</span>
+              </label>
+              <div className="grid grid-cols-5 gap-1.5">
+                {LEVERAGE_PRESETS.map(lev => (
+                  <button key={lev} onClick={() => setBotLev(lev)}
+                    className={`py-1.5 rounded-lg text-xs font-bold font-mono border transition-all ${
+                      botLev === lev
+                        ? 'bg-[#ff9900]/20 text-[#ff9900] border-[#ff9900]/40'
+                        : 'bg-[#0c1f35] text-[#3d5a73] border-[#1a3a5c] hover:border-[#ff9900]/30 hover:text-[#ff9900]/70'
+                    }`}>
+                    {lev}×
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Perfil de risco */}
+            <div>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-2">Perfil de Risco (ajusta TP/SL)</label>
               <div className="grid grid-cols-3 gap-2">
                 {RISK_PROFILES.map(rp => (
                   <button key={rp.id} onClick={() => setBotRisk(rp.id)}
                     className="p-2.5 rounded-xl border text-center transition-all"
-                    style={botRisk===rp.id ? { borderColor:rp.color, backgroundColor:`${rp.color}15` } : { borderColor:'#1a3a5c' }}>
-                    <div className="text-xs font-bold font-mono" style={{ color: botRisk===rp.id ? rp.color : '#8ba3be' }}>{rp.label}</div>
+                    style={botRisk === rp.id ? { borderColor: rp.color, backgroundColor: `${rp.color}15` } : { borderColor: '#1a3a5c' }}>
+                    <div className="text-xs font-bold font-mono" style={{ color: botRisk === rp.id ? rp.color : '#8ba3be' }}>{rp.label}</div>
                     <div className="text-[9px] font-mono text-[#3d5a73] mt-0.5">{rp.desc}</div>
                   </button>
                 ))}
@@ -642,17 +737,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             </div>
 
-            {/* Par opcional */}
-            <div>
-              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">
-                Par específico <span className="text-[#1a3a5c]">(opcional · vazio = IA escolhe)</span>
-              </label>
-              <input type="text" value={botPair} onChange={e => setBotPair(e.target.value.toUpperCase())}
-                placeholder="Ex: BTC/USDT  ·  (deixa vazio para IA escolher)"
-                className="w-full bg-[#0c1f35] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm text-[#e8f4ff] font-mono focus:outline-none focus:border-[#00d4ff]/50 placeholder-[#3d5a73]"
-              />
-            </div>
-
             {/* Auto-repetir */}
             <div className="flex items-center justify-between p-3 rounded-xl bg-[#0c1f35] border border-[#1a3a5c]">
               <div>
@@ -664,10 +748,10 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </button>
             </div>
 
-            {/* Botão principal */}
+            {/* Botão */}
             <div className="flex gap-3">
               <button onClick={runBot} disabled={!selectedKey || botRunning}
-                className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-[#00d4ff]/20 to-[#00ff88]/15 text-[#00d4ff] border border-[#00d4ff]/40 text-sm font-bold font-mono hover:from-[#00d4ff]/30 hover:to-[#00ff88]/25 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
+                className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-[#ff9900]/20 to-[#ff4466]/15 text-[#ff9900] border border-[#ff9900]/40 text-sm font-bold font-mono hover:from-[#ff9900]/30 hover:to-[#ff4466]/25 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
                 {botRunning
                   ? <><RefreshCw size={16} className="animate-spin" />A analisar...</>
                   : <><Sparkles size={16} />Executar Bot IA</>}
@@ -681,130 +765,19 @@ export default function AutoTraderTab({ user }: { user: any }) {
             </div>
           </div>
 
-          {/* Result + Activity */}
+          {/* Resultado + Activity */}
           <div className="space-y-4">
             <div className="glass-card p-5">
               <BotResultCard status={botStatus} result={botResult} />
             </div>
-            {/* Activity feed */}
             <ActivityFeed maxVisible={10} />
           </div>
         </div>
       )}
 
-      {/* ── MANUAL ──────────────────────────────────────────────────────────── */}
-      {section === 'manual' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div className="glass-card p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap size={16} className="text-[#ffcc00]" />
-              <span className="text-sm font-bold">Ordem Manual</span>
-              <span className="text-[10px] font-mono text-[#3d5a73]">Controlas tudo tu</span>
-            </div>
-
-            {!selectedKey && (
-              <div className="p-3 rounded-xl bg-[#ff4466]/5 border border-[#ff4466]/20 text-xs font-mono text-[#ff4466]">
-                ⚠ Conecta uma conta no separador <button onClick={() => setSection('keys')} className="underline">Contas</button>
-              </div>
-            )}
-
-            <div className="flex gap-1 p-1 rounded-xl bg-[#0c1f35] border border-[#1a3a5c]">
-              {(['spot','futures'] as TradeMode[]).map(m => (
-                <button key={m} onClick={() => setExecMode(m)}
-                  className={`flex-1 py-2 rounded-lg text-xs font-bold font-mono transition-all flex items-center justify-center gap-1.5 ${
-                    execMode===m
-                      ? m==='futures' ? 'bg-[#ff9900]/20 text-[#ff9900] border border-[#ff9900]/30'
-                      : 'bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/30'
-                      : 'text-[#3d5a73]'
-                  }`}>
-                  {m==='spot' ? '💰 SPOT' : '⚡ FUTUROS'}
-                </button>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <InputField label="Par" value={execPair} onChange={setExecPair} placeholder="BTC/USDT" />
-              <InputField label="Tamanho (USDT)" value={execSize} onChange={setExecSize} type="number" min={1} step={1} />
-            </div>
-
-            <div>
-              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">{execMode==='futures' ? 'Posição' : 'Direcção'}</label>
-              <div className="grid grid-cols-2 gap-2">
-                {(['Buy','Sell'] as const).map(s => (
-                  <button key={s} onClick={() => setExecSide(s)}
-                    className={`py-2.5 rounded-xl text-sm font-bold font-mono border transition-all flex items-center justify-center gap-2 ${
-                      execSide===s
-                        ? s==='Buy' ? 'bg-[#00ff88]/15 text-[#00ff88] border-[#00ff88]/40'
-                        : 'bg-[#ff4466]/15 text-[#ff4466] border-[#ff4466]/40'
-                        : 'text-[#3d5a73] border-[#1a3a5c]'
-                    }`}>
-                    {s==='Buy' ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
-                    {s==='Buy' ? (execMode==='futures' ? 'ABRIR LONG' : 'COMPRAR') : (execMode==='futures' ? 'ABRIR SHORT' : 'VENDER')}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {execMode === 'futures' && (
-              <div>
-                <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Alavancagem</label>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {LEVERAGE_PRESETS.map(lev => (
-                    <button key={lev} onClick={() => setExecLev(lev)}
-                      className={`py-1.5 rounded-lg text-xs font-bold font-mono border transition-all ${
-                        execLev===lev ? 'bg-[#ff9900]/20 text-[#ff9900] border-[#ff9900]/40' : 'bg-[#0c1f35] text-[#3d5a73] border-[#1a3a5c]'
-                      }`}>
-                      {lev}×
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {execMode === 'futures' && (
-              <div className="grid grid-cols-2 gap-3">
-                <InputField label="Take Profit (opcional)" value={execTp} onChange={setExecTp} type="number" step={0.01} placeholder="0.00" />
-                <InputField label="Stop Loss (opcional)" value={execSl} onChange={setExecSl} type="number" step={0.01} placeholder="0.00" />
-              </div>
-            )}
-
-            <div className="p-3 rounded-xl bg-[#0c1f35] border border-[#1a3a5c] text-xs font-mono space-y-1.5">
-              <div className="flex justify-between"><span className="text-[#3d5a73]">Par</span><span className="font-bold">{execPair}</span></div>
-              <div className="flex justify-between"><span className="text-[#3d5a73]">{execMode==='futures' ? 'Posição' : 'Direcção'}</span>
-                <span className={`font-bold ${execSide==='Buy' ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>
-                  {execSide==='Buy' ? (execMode==='futures' ? '▲ LONG' : '▲ COMPRA') : (execMode==='futures' ? '▼ SHORT' : '▼ VENDA')}
-                </span>
-              </div>
-              <div className="flex justify-between"><span className="text-[#3d5a73]">Tamanho</span><span>${execSize} USDT</span></div>
-              {execMode==='futures' && <div className="flex justify-between"><span className="text-[#3d5a73]">Alavancagem</span><span className="text-[#ff9900]">{execLev}×</span></div>}
-            </div>
-
-            <label className="flex items-center gap-2 cursor-pointer">
-              <div onClick={() => setExecConfirm(!execConfirm)}
-                className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${execConfirm ? 'bg-[#00ff88] border-[#00ff88]' : 'border-[#3d5a73]'}`}>
-                {execConfirm && <span className="text-[#020b14] text-[10px] font-bold">✓</span>}
-              </div>
-              <span className="text-xs font-mono text-[#8ba3be]">Confirmo que quero executar esta ordem com dinheiro real</span>
-            </label>
-
-            <button onClick={executeManual} disabled={!selectedKey || !execConfirm || execLoading}
-              className={`w-full py-3 rounded-xl text-sm font-bold font-mono border transition-all flex items-center justify-center gap-2 disabled:opacity-40 ${
-                execSide==='Buy' ? 'bg-[#00ff88]/15 text-[#00ff88] border-[#00ff88]/40 hover:bg-[#00ff88]/25'
-                : 'bg-[#ff4466]/15 text-[#ff4466] border-[#ff4466]/40 hover:bg-[#ff4466]/25'
-              }`}>
-              {execLoading ? <RefreshCw size={14} className="animate-spin"/> : <Play size={14}/>}
-              {execSide==='Buy' ? (execMode==='futures' ? `ABRIR LONG ${execPair}` : `COMPRAR ${execPair}`) : (execMode==='futures' ? `ABRIR SHORT ${execPair}` : `VENDER ${execPair}`)}
-            </button>
-          </div>
-
-          {/* Activity na coluna da direita */}
-          <div className="space-y-4">
-            <ActivityFeed maxVisible={12} />
-          </div>
-        </div>
-      )}
-
-      {/* ── CONTAS ──────────────────────────────────────────────────────────── */}
+      {/* ════════════════════════════════════════════════════════════════════════
+          CONTAS
+      ════════════════════════════════════════════════════════════════════════ */}
       {section === 'keys' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className="glass-card p-5 space-y-4">
@@ -831,9 +804,17 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             </div>
 
-            <InputField label="API Key" value={apiKey} onChange={setApiKey} placeholder="Cola a tua API key..." />
-            <InputField label="API Secret" value={apiSec} onChange={setApiSec} placeholder="••••••••••••" type="password" />
-            <InputField label="Etiqueta" value={keyLabel} onChange={setKeyLabel} placeholder="Conta Principal" />
+            {[
+              { label:'API Key', val:apiKey, set:setApiKey, ph:'Cola a tua API key...', type:'text' },
+              { label:'API Secret', val:apiSec, set:setApiSec, ph:'••••••••••••', type:'password' },
+              { label:'Etiqueta', val:keyLabel, set:setKeyLabel, ph:'Conta Principal', type:'text' },
+            ].map(f => (
+              <div key={f.label}>
+                <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">{f.label}</label>
+                <input type={f.type} value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.ph}
+                  className="w-full bg-[#0c1f35] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm text-[#e8f4ff] font-mono focus:outline-none focus:border-[#00d4ff]/50 placeholder-[#3d5a73]" />
+              </div>
+            ))}
 
             {EXCHANGES.find(e=>e.id===selEx)?.testnetSupported && (
               <div className="flex items-center justify-between">
@@ -863,7 +844,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
               ) : (
                 <div className="space-y-2">
                   {keys.map(k => (
-                    <div key={k.id} onClick={() => { setSelectedKey(k.id); logAction(`Conta seleccionada: ${k.label}`) }}
+                    <div key={k.id} onClick={() => setSelectedKey(k.id)}
                       className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedKey===k.id ? 'border-[#00d4ff]/40 bg-[#00d4ff]/5' : 'border-[#1a3a5c] hover:border-[#00d4ff]/20'}`}>
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
@@ -887,8 +868,9 @@ export default function AutoTraderTab({ user }: { user: any }) {
             {balance && balance.length > 0 && (
               <div className="glass-card p-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <Wallet size={14} className="text-[#00d4ff]"/><span className="text-sm font-bold">Saldo detalhado</span>
-                  <button onClick={() => selectedKey && loadBalance(selectedKey)} className="ml-auto w-6 h-6 rounded bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#00d4ff]">
+                  <Wallet size={14} className="text-[#00d4ff]"/><span className="text-sm font-bold">Saldo</span>
+                  <button onClick={() => selectedKey && loadBalance(selectedKey, section === 'futures' ? 'futures' : 'spot')}
+                    className="ml-auto w-6 h-6 rounded bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#00d4ff]">
                     <RefreshCw size={10} className={balLoading ? 'animate-spin' : ''}/>
                   </button>
                 </div>
@@ -905,14 +887,14 @@ export default function AutoTraderTab({ user }: { user: any }) {
                 </div>
               </div>
             )}
-
-            {/* Activity feed no separador de contas */}
             <ActivityFeed maxVisible={6} collapsed />
           </div>
         </div>
       )}
 
-      {/* ── HISTÓRICO ───────────────────────────────────────────────────────── */}
+      {/* ════════════════════════════════════════════════════════════════════════
+          HISTÓRICO
+      ════════════════════════════════════════════════════════════════════════ */}
       {section === 'history' && (
         <div className="space-y-4">
           <div className="glass-card p-5">
@@ -929,13 +911,12 @@ export default function AutoTraderTab({ user }: { user: any }) {
                     <tr className="text-[#3d5a73] border-b border-[#1a3a5c]">
                       <th className="text-left py-2 pr-3">Exchange</th>
                       <th className="text-left py-2 pr-3">Par</th>
-                      <th className="text-left py-2 pr-3">Posição</th>
+                      <th className="text-left py-2 pr-3">Operação</th>
                       <th className="text-left py-2 pr-3">Modo</th>
                       <th className="text-right py-2 pr-3">Preço</th>
                       <th className="text-right py-2 pr-3">TP</th>
                       <th className="text-right py-2 pr-3">SL</th>
                       <th className="text-center py-2 pr-3">Estado</th>
-                      <th className="text-center py-2 pr-3">Origem</th>
                       <th className="text-right py-2">Data</th>
                     </tr>
                   </thead>
@@ -946,7 +927,9 @@ export default function AutoTraderTab({ user }: { user: any }) {
                         <td className="py-2.5 pr-3 font-bold text-[#e8f4ff]">{t.pair}</td>
                         <td className="py-2.5 pr-3">
                           <span className={`font-bold ${t.side==='Buy' ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>
-                            {t.side==='Buy' ? (t.trade_mode==='futures' ? '▲ LONG' : '▲ COMPRA') : (t.trade_mode==='futures' ? '▼ SHORT' : '▼ VENDA')}
+                            {t.side==='Buy'
+                              ? (t.trade_mode==='futures' ? '▲ LONG'   : '▲ COMPRA')
+                              : (t.trade_mode==='futures' ? '▼ SHORT'  : '▼ VENDA')}
                           </span>
                         </td>
                         <td className="py-2.5 pr-3">
@@ -956,13 +939,8 @@ export default function AutoTraderTab({ user }: { user: any }) {
                         </td>
                         <td className="py-2.5 pr-3 text-right text-[#e8f4ff]">${t.price?.toFixed(4)}</td>
                         <td className="py-2.5 pr-3 text-right text-[#00ff88]">{t.take_profit>0 ? `$${t.take_profit.toFixed(4)}` : '—'}</td>
-                        <td className="py-2.5 pr-3 text-right text-[#ff4466]">{t.stop_loss>0 ? `$${t.stop_loss.toFixed(4)}` : '—'}</td>
+                        <td className="py-2.5 pr-3 text-right text-[#ff4466]">{t.stop_loss>0   ? `$${t.stop_loss.toFixed(4)}`   : '—'}</td>
                         <td className="py-2.5 pr-3 text-center"><StatusBadge status={t.status}/></td>
-                        <td className="py-2.5 pr-3 text-center">
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${t.triggered_by==='ai_auto' ? 'text-[#00d4ff] bg-[#00d4ff]/10 border-[#00d4ff]/30' : 'text-[#3d5a73] border-[#1a3a5c]'}`}>
-                            {t.triggered_by==='ai_auto' ? '🤖 AUTO' : '👆 MANUAL'}
-                          </span>
-                        </td>
                         <td className="py-2.5 text-right text-[#3d5a73]">
                           {t.created_at ? new Date(t.created_at).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}
                         </td>
