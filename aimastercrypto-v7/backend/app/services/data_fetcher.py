@@ -49,14 +49,14 @@ ALL_PAIRS = [
     "IMX/USDT", "SAND/USDT", "MANA/USDT",
 ]
 
-# Pairs used in auto-scan — excludes tokens not on Hyperliquid that always
-# fall back to CryptoCompare and hammer the free-tier rate limit.
-_CC_ONLY_PAIRS = {
-    "PEPE/USDT", "BONK/USDT", "FLOKI/USDT", "SHIB/USDT", "RAY/USDT", "MATIC/USDT",
-    "MOG/USDT", "TURBO/USDT", "POPCAT/USDT", "MEW/USDT", "FARTCOIN/USDT",
-    "SAND/USDT", "MANA/USDT", "GRT/USDT", "RPL/USDT",
-}
-SCAN_PAIRS = [p for p in ALL_PAIRS if p not in _CC_ONLY_PAIRS]
+# Pairs used in auto-scan — limited to top liquid pairs on Hyperliquid
+# to avoid hammering free-tier rate limits on Groq/Gemini/CryptoCompare.
+# Expand this list once paid API keys are configured.
+SCAN_PAIRS = [
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "BNB/USDT",
+    "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "SUI/USDT",
+    "HYPE/USDT", "ENA/USDT", "INJ/USDT", "WIF/USDT", "TON/USDT",
+]
 
 _hl_symbols: set = set()
 _hl_symbols_ts: float = 0.0
