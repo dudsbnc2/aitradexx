@@ -453,6 +453,17 @@ async def _mexc_request(
 
 MEXC_FUTURES_BASE = "https://contract.mexc.com"
 
+# ── Proxy para MEXC Futures (contract.mexc.com bloqueia IPs de cloud) ──────────
+# Define MEXC_FUTURES_PROXY no Railway com um proxy HTTP/SOCKS5
+# Ex: MEXC_FUTURES_PROXY=http://user:pass@proxy-host:port
+# ou  MEXC_FUTURES_PROXY=socks5://user:pass@proxy-host:port
+# Se não definido, tenta ligação directa (funciona em IPs residenciais/VPS)
+def _get_futures_proxy() -> dict | None:
+    proxy_url = os.environ.get("MEXC_FUTURES_PROXY", "").strip()
+    if proxy_url:
+        return {"http://": proxy_url, "https://": proxy_url}
+    return None
+
 
 def _mexc_futures_sign(api_key: str, api_secret: str, ts: str, body_str: str) -> str:
     """MEXC Futures: HMAC-SHA256(apiKey + timestamp + body_json)"""
@@ -466,7 +477,10 @@ async def _mexc_futures_request(
     params: dict | None = None,
     body: dict | None = None,
 ) -> dict:
-    """MEXC Futures REST (contract.mexc.com) com autenticação correcta."""
+    """
+    MEXC Futures REST (contract.mexc.com).
+    Usa proxy se MEXC_FUTURES_PROXY estiver definido (necessário em IPs de cloud).
+    """
     url = f"{MEXC_FUTURES_BASE}{endpoint}"
     ts  = str(int(time.time() * 1000))
     body_str = json.dumps(body, separators=(",", ":")) if body else ""
@@ -476,9 +490,15 @@ async def _mexc_futures_request(
         "Request-Time": ts,
         "Signature":    sig,
         "Content-Type": "application/json",
+        "User-Agent":   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     }
 
-    async with httpx.AsyncClient(timeout=10) as client:
+    proxy = _get_futures_proxy()
+    client_kwargs: dict = {"timeout": 15}
+    if proxy:
+        client_kwargs["proxies"] = proxy
+
+    async with httpx.AsyncClient(**client_kwargs) as client:
         if method.upper() == "GET":
             resp = await client.get(url, params=params or {}, headers=headers)
         else:
@@ -487,8 +507,15 @@ async def _mexc_futures_request(
     try:
         data = resp.json()
     except Exception:
-        raw = getattr(resp, 'text', '')
-        logger.error(f"MEXC Futures resposta não-JSON {resp.status_code}: {raw[:200]}")
+        raw = getattr(resp, "text", "")
+        logger.error(f"MEXC Futures resposta não-JSON {resp.status_code}: {raw[:300]}")
+        if resp.status_code == 403:
+            raise HTTPException(
+                403,
+                "MEXC Futuros: acesso bloqueado (IP de cloud). "
+                "Define a variável MEXC_FUTURES_PROXY no Railway com um proxy HTTP/SOCKS5. "
+                "Exemplo: MEXC_FUTURES_PROXY=http://user:pass@proxy:port"
+            )
         raise HTTPException(502, f"MEXC Futuros: resposta inválida (HTTP {resp.status_code})")
     if isinstance(data, dict) and data.get("code") not in (None, 0, 200):
         raise HTTPException(400, f"MEXC Futuros: {data.get('message', data.get('msg', 'Unknown error'))}")
@@ -646,11 +673,21 @@ async def _mexc_execute_futures(
     except Exception as e:
         logger.warning(f"MEXC change_leverage ignorado ({symbol}): {e} — leverage enviado na ordem")
 
-    # Preço atual
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{MEXC_FUTURES_BASE}/api/v1/contract/ticker",
-                             params={"symbol": symbol})
-    ticker_data = r.json()
+    # Preço atual (também usa proxy se definido)
+    proxy = _get_futures_proxy()
+    _ck: dict = {"timeout": 10}
+    if proxy:
+        _ck["proxies"] = proxy
+    async with httpx.AsyncClient(**_ck) as client:
+        r = await client.get(
+            f"{MEXC_FUTURES_BASE}/api/v1/contract/ticker",
+            params={"symbol": symbol},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        )
+    try:
+        ticker_data = r.json()
+    except Exception:
+        raise HTTPException(502, f"MEXC Futuros ticker: resposta inválida (HTTP {r.status_code})")
     price = float(ticker_data.get("data", {}).get("lastPrice", 0))
     if not price:
         raise HTTPException(400, f"Par {pair} não encontrado na MEXC Futuros")
