@@ -248,7 +248,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
   const [botSize,    setBotSize]    = useState(10)
   const [botLev,     setBotLev]     = useState(10)
   const [botRisk,    setBotRisk]    = useState<RiskProfile>('balanced')
-  const [botMinConf, setBotMinConf] = useState(70)
+  const [botMinConf, setBotMinConf] = useState(55)
   const [botStatus,  setBotStatus]  = useState<BotStatus>('idle')
   const [botResult,  setBotResult]  = useState<AIRunResult|null>(null)
   const [autoRepeat, setAutoRepeat] = useState(false)
@@ -869,7 +869,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
               <div className="glass-card p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Wallet size={14} className="text-[#00d4ff]"/><span className="text-sm font-bold">Saldo</span>
-                  <button onClick={() => selectedKey && loadBalance(selectedKey, section === 'futures' ? 'futures' : 'spot')}
+                  <button onClick={() => selectedKey && loadBalance(selectedKey, 'spot')}
                     className="ml-auto w-6 h-6 rounded bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#00d4ff]">
                     <RefreshCw size={10} className={balLoading ? 'animate-spin' : ''}/>
                   </button>
