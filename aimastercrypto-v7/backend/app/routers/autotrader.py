@@ -230,7 +230,12 @@ async def _bybit_request(
                 if method.upper() == "GET"
                 else await client.post(url, json=body, headers=headers))
 
-    data = resp.json()
+    try:
+        data = resp.json()
+    except Exception:
+        raw = getattr(resp, 'text', '')
+        logger.error(f"Bybit resposta não-JSON {resp.status_code}: {raw[:200]}")
+        raise HTTPException(502, f"Bybit: resposta inválida (HTTP {resp.status_code})")
     if data.get("retCode", 0) != 0:
         raise HTTPException(400, f"Bybit: {data.get('retMsg', 'Unknown error')}")
     return data
@@ -406,40 +411,39 @@ async def _mexc_request(
     params: dict | None = None,
     body: dict | None = None,
 ) -> dict:
-    """MEXC V3 Spot REST — assinatura correcta para GET e POST."""
+    """
+    MEXC V3 Spot REST.
+    Assinatura: todos os parametros (query + body) em query string, ordem de inserção,
+    sem sorted(). Ref: https://mexcdevelop.github.io/apidocs/spot_v3_en/
+    """
     url = f"{MEXC_BASE}{endpoint}"
     ts  = str(int(time.time() * 1000))
 
-    if method.upper() == "GET":
-        # GET: todos os params + recvWindow + timestamp → assinar
-        p = dict(params or {})
-        p["recvWindow"] = "10000"
-        p["timestamp"]  = ts
-        p["signature"]  = _mexc_sign(api_secret, p)
-        headers = {"X-MEXC-APIKEY": api_key}
+    # Juntar todos os params: query params primeiro, depois body fields
+    p: dict = {}
+    if params:
+        p.update(params)
+    if body:
+        p.update(body)
+    p["timestamp"] = ts
+    p["signature"] = _mexc_sign(api_secret, p)
 
-        async with httpx.AsyncClient(timeout=10) as client:
+    headers = {"X-MEXC-APIKEY": api_key}
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        if method.upper() == "GET":
             resp = await client.get(url, params=p, headers=headers)
-    else:
-        # POST: body fields + recvWindow + timestamp → assinar; query só com sig params
-        sign_dict = dict(body or {})
-        sign_dict.update(params or {})
-        sign_dict["recvWindow"] = "10000"
-        sign_dict["timestamp"]  = ts
-        signature = _mexc_sign(api_secret, sign_dict)
-        # Query string: recvWindow + timestamp + signature
-        query_params = {"recvWindow": "10000", "timestamp": ts, "signature": signature}
-        headers = {"X-MEXC-APIKEY": api_key, "Content-Type": "application/json"}
+        else:
+            # MEXC V3: POST de ordens envia TUDO como query string (incluindo body fields)
+            resp = await client.post(url, params=p, headers=headers)
 
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, params=query_params, json=body or {}, headers=headers)
-
-    # Raise on HTTP errors first so we always get a meaningful exception
     try:
         data = resp.json()
     except Exception:
-        resp.raise_for_status()
-        raise HTTPException(500, "MEXC: resposta inválida")
+        raw = getattr(resp, "text", "")
+        logger.error(f"MEXC resposta não-JSON {resp.status_code}: {raw[:200]}")
+        raise HTTPException(502, f"MEXC: resposta inválida (HTTP {resp.status_code})")
+
     if resp.status_code >= 400 or (isinstance(data, dict) and data.get("code") not in (None, 0, 200)):
         err_msg = data.get("msg") or data.get("message") or str(data)
         logger.error(f"MEXC API error {resp.status_code}: {err_msg} | body={data}")
@@ -480,7 +484,12 @@ async def _mexc_futures_request(
         else:
             resp = await client.post(url, params=params or {}, content=body_str, headers=headers)
 
-    data = resp.json()
+    try:
+        data = resp.json()
+    except Exception:
+        raw = getattr(resp, 'text', '')
+        logger.error(f"MEXC Futures resposta não-JSON {resp.status_code}: {raw[:200]}")
+        raise HTTPException(502, f"MEXC Futuros: resposta inválida (HTTP {resp.status_code})")
     if isinstance(data, dict) and data.get("code") not in (None, 0, 200):
         raise HTTPException(400, f"MEXC Futuros: {data.get('message', data.get('msg', 'Unknown error'))}")
     return data
