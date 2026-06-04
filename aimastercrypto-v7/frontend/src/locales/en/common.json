@@ -21,7 +21,12 @@
     "top_losers": "Top Losers",
     "ai_summary": "AI Market Summary",
     "live_signals": "Live Signals",
-    "market_sentiment": "Market Sentiment"
+    "market_sentiment": "Market Sentiment",
+    "active_cryptos": "Active Cryptos",
+    "active_cryptos_sub": "in circulation",
+    "market_cap_sub": "total capitalisation",
+    "volume_": "Volume",
+    "volume_sub": "last 24 hours"
   },
   "scanner": {
     "title": "AI Scanner",
@@ -32,7 +37,16 @@
     "analyze": "Analyze",
     "actionable": "Actionable",
     "scanned": "Scanned",
-    "best_signal": "Best Signal"
+    "best_signal": "Best Signal",
+    "active_signals": "active signals",
+    "after_scan": "after scan",
+    "analyzing": "Analyzing...",
+    "click_scan": "Click Scan to start",
+    "pairs_available": "pairs available",
+    "pairs_monitoring": "pairs monitored",
+    "scanning_pairs": "Scanning pairs...",
+    "select_pair_hint": "Select a pair to analyze",
+    "wait_pairs": "Loading pairs..."
   },
   "signal": {
     "long": "LONG",
@@ -67,6 +81,14 @@
     "wins": "Wins",
     "losses": "Losses"
   },
+  "history": {
+    "title": "Signal History",
+    "subtitle": "Closed signals and results",
+    "closed_signals": "Closed Signals",
+    "win_rate": "Win Rate",
+    "avg_pnl": "Avg PnL",
+    "wins_losses": "Wins / Losses"
+  },
   "common": {
     "loading": "Loading...",
     "error": "Error loading data",
@@ -80,6 +102,38 @@
     "free": "Free",
     "upgrade": "Upgrade to Premium",
     "language": "Language",
-    "theme": "Theme"
+    "theme": "Theme",
+    "asset": "Asset",
+    "change_": "Change",
+    "login": "Login",
+    "logout": "Logout",
+    "market_cap_col": "Market Cap",
+    "price": "Price",
+    "rank": "Rank",
+    "register": "Register",
+    "search_pair": "Search pair..."
+  },
+  "news": {
+    "empty_hint": "Try again later",
+    "empty_title": "No news available",
+    "filter_all": "All",
+    "filter_negative": "Negative",
+    "filter_positive": "Positive",
+    "loading": "Loading news..."
+  },
+  "style": {
+    "display": "Display"
+  },
+  "watchlist": {
+    "add_first": "Add your first pair",
+    "add_pair": "Add Pair",
+    "analyze": "Analyze",
+    "empty_hint": "Click + to add pairs",
+    "empty_title": "Empty list",
+    "market_cap": "MCap",
+    "pair": "Pair",
+    "pairs": "Pairs",
+    "pairs_saved": "pairs saved",
+    "remove_tooltip": "Remove from list"
   }
 }
