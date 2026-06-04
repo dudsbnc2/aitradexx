@@ -924,7 +924,7 @@ export default function Home() {
     { id: 'scanner', label: t.nav.scanner, icon: Scan },
     { id: 'signal', label: t.nav.signals, icon: Zap },
     ...(isAdmin ? [{ id: 'backtest', label: t.nav.backtest, icon: BarChart3 }] : []),
-    { id: 'history', label: 'Histórico', icon: History },
+    { id: 'history', label: t.nav.history, icon: History },
     { id: 'watchlist', label: t.nav.watchlist, icon: Star },
     { id: 'news', label: t.nav.news, icon: BookOpen },
     { id: 'autotrader', label: 'Auto Trade', icon: Bot },
