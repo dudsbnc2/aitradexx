@@ -426,7 +426,7 @@ async def run_signal(pair: str, timeframe: str, use_mtf: bool = True, use_ai: bo
             logger.warning(f"MTF failed {pair}/{timeframe}: {e}")
 
     if use_ai:
-        signal, source = await get_ai_signal(pair, timeframe, ind, mtf)
+        signal, source = await get_ai_signal(pair, timeframe, ind, mtf, user_id=user_id)
         signal["source"] = source
     else:
         signal = rule_engine(ind)
