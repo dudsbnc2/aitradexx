@@ -1,25 +1,9 @@
 'use client'
 
-/**
- * AccountStatusBar.tsx
- * Barra de estado da conta sempre visível no topo do AutoTrader.
- * Mostra: exchange conectada, saldo USDT, estado da ligação, último bot run.
- */
-
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { Wifi, WifiOff, Wallet, RefreshCw, CheckCircle, AlertCircle, Clock } from 'lucide-react'
-
-interface AccountInfo {
-  keyId:     number
-  label:     string
-  exchange:  string
-  testnet:   boolean
-  usdtBalance: number
-  totalUsdValue: number
-  lastUpdated: Date
-  status:    'connected' | 'connecting' | 'error'
-}
+import { useTranslations } from 'next-intl'
 
 interface Props {
   keyId:       number | null
@@ -34,26 +18,29 @@ interface Props {
 }
 
 const EXCHANGE_LOGO: Record<string, string> = {
-  bybit: '🟡',
-  mexc:  '🔵',
+  bybit:       '🟡',
+  okx:         '🔷',
+  hyperliquid: '🟣',
+  mexc:        '🔵',
 }
 
 export default function AccountStatusBar({
   keyId, keyLabel, exchange, testnet, balance, loading, walletMode = 'spot', onRefresh, lastBotRun,
 }: Props) {
+  const t = useTranslations()
   const [now, setNow] = useState(new Date())
 
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 10000)
-    return () => clearInterval(t)
+    const timer = setInterval(() => setNow(new Date()), 10000)
+    return () => clearInterval(timer)
   }, [])
 
   if (!keyId) {
     return (
       <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#0c1f35] border border-[#1a3a5c]">
         <WifiOff size={14} className="text-[#ff4466]" />
-        <span className="text-xs font-mono text-[#ff4466] font-bold">Sem conta conectada</span>
-        <span className="text-xs font-mono text-[#3d5a73]">— Vai a Contas e conecta uma exchange para começar</span>
+        <span className="text-xs font-mono text-[#ff4466] font-bold">{t('autotrader.account_status_no_account')}</span>
+        <span className="text-xs font-mono text-[#3d5a73]">{t('autotrader.account_status_no_account_hint')}</span>
       </div>
     )
   }
@@ -77,7 +64,7 @@ export default function AccountStatusBar({
           <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-[#00ff88] animate-pulse" />
         </div>
         <div>
-          <div className="text-[10px] font-mono text-[#3d5a73]">Conta activa</div>
+          <div className="text-[10px] font-mono text-[#3d5a73]">{t('autotrader.account_status_active')}</div>
           <div className="text-xs font-bold font-mono text-[#00ff88] flex items-center gap-1">
             {logo} {keyLabel}
             {testnet && <span className="px-1 py-0.5 rounded text-[8px] bg-[#ffcc00]/10 text-[#ffcc00] border border-[#ffcc00]/30">TEST</span>}
@@ -85,24 +72,24 @@ export default function AccountStatusBar({
         </div>
       </div>
 
-      {/* Saldo USDT */}
+      {/* Balance USDT */}
       <div className="flex items-center gap-2 px-4 py-3 border-r border-[#1a3a5c]">
         <Wallet size={13} className={walletMode === 'futures' ? 'text-[#ff9900]' : 'text-[#00d4ff]'} />
         <div>
           <div className="text-[10px] font-mono text-[#3d5a73] flex items-center gap-1">
-            Saldo USDT
+            {t('autotrader.account_status_balance')}
             <span className={`px-1 rounded text-[8px] font-bold border ${
               walletMode === 'futures'
                 ? 'text-[#ff9900] border-[#ff9900]/30 bg-[#ff9900]/10'
                 : 'text-[#00ff88] border-[#00ff88]/30 bg-[#00ff88]/10'
             }`}>
-              {walletMode === 'futures' ? '⚡ FUTUROS' : '💰 SPOT'}
+              {walletMode === 'futures' ? t('autotrader.orders_futures') : t('autotrader.orders_spot')}
             </span>
           </div>
           {loading ? (
             <div className="flex items-center gap-1">
               <RefreshCw size={10} className="animate-spin text-[#3d5a73]" />
-              <span className="text-xs font-mono text-[#3d5a73]">a carregar...</span>
+              <span className="text-xs font-mono text-[#3d5a73]">{t('autotrader.account_status_loading')}</span>
             </div>
           ) : usdtBal !== null ? (
             <div className="text-xs font-bold font-mono text-[#e8f4ff]">
@@ -118,17 +105,17 @@ export default function AccountStatusBar({
       {totalUsd > 0 && (
         <div className="flex items-center gap-2 px-4 py-3 border-r border-[#1a3a5c]">
           <div>
-            <div className="text-[10px] font-mono text-[#3d5a73]">Total carteira</div>
+            <div className="text-[10px] font-mono text-[#3d5a73]">{t('autotrader.balance_total')}</div>
             <div className="text-xs font-bold font-mono text-[#e8f4ff]">${totalUsd.toFixed(2)}</div>
           </div>
         </div>
       )}
 
-      {/* Último bot run */}
+      {/* Last bot run */}
       {lastBotRun && (
         <div className="flex items-center gap-2 px-4 py-3 border-r border-[#1a3a5c]">
           <div>
-            <div className="text-[10px] font-mono text-[#3d5a73]">Último bot</div>
+            <div className="text-[10px] font-mono text-[#3d5a73]">{t('autotrader.account_status_last_bot')}</div>
             {lastBotRun.executed ? (
               <div className="text-xs font-bold font-mono text-[#00ff88] flex items-center gap-1">
                 <CheckCircle size={10} />
@@ -137,24 +124,24 @@ export default function AccountStatusBar({
             ) : (
               <div className="text-xs font-mono text-[#ffcc00] flex items-center gap-1">
                 <Clock size={10} />
-                Sem sinal
+                {t('autotrader.account_status_no_signal')}
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* Pronto a operar */}
+      {/* Ready to trade */}
       <div className="flex items-center gap-2 px-4 py-3 ml-auto">
         {usdtBal !== null && usdtBal >= 5 ? (
           <div className="flex items-center gap-1.5 text-xs font-mono text-[#00ff88]">
             <CheckCircle size={12} />
-            <span className="font-bold">Pronto a operar</span>
+            <span className="font-bold">{t('autotrader.balance_ready')}</span>
           </div>
         ) : usdtBal !== null && usdtBal < 5 ? (
           <div className="flex items-center gap-1.5 text-xs font-mono text-[#ffcc00]">
             <AlertCircle size={12} />
-            <span>Saldo insuficiente</span>
+            <span>{t('autotrader.balance_insufficient')}</span>
           </div>
         ) : null}
         {onRefresh && (
