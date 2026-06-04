@@ -500,7 +500,7 @@ function HistoryPanel() {
         </select>
         <button onClick={load} disabled={loading}
           className="px-4 py-1.5 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] text-xs font-mono text-[#00d4ff] hover:border-[#00d4ff]/50 transition-all">
-          {loading ? 'Carregando...' : 'Filtrar'}
+          {loading ? t.common.loading : t.common.filter}
         </button>
       </div>
 
@@ -509,10 +509,10 @@ function HistoryPanel() {
         <div className="space-y-3">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-              { label: 'Sinais Fechados', value: stats.total, color: '#00d4ff' },
-              { label: 'Taxa de Acerto', value: `${stats.win_rate}%`, color: stats.win_rate >= 50 ? '#00ff88' : '#ff4466' },
-              { label: 'PnL Médio', value: `${stats.avg_pnl > 0 ? '+' : ''}${stats.avg_pnl}%`, color: stats.avg_pnl >= 0 ? '#00ff88' : '#ff4466' },
-              { label: 'G / P', value: `${stats.wins} / ${stats.losses}`, color: '#b366ff' },
+              { label: t.history.closed_signals, value: stats.total, color: '#00d4ff' },
+              { label: t.history.win_rate, value: `${stats.win_rate}%`, color: stats.win_rate >= 50 ? '#00ff88' : '#ff4466' },
+              { label: t.history.avg_pnl, value: `${stats.avg_pnl > 0 ? '+' : ''}${stats.avg_pnl}%`, color: stats.avg_pnl >= 0 ? '#00ff88' : '#ff4466' },
+              { label: t.history.wins_losses, value: `${stats.wins} / ${stats.losses}`, color: '#b366ff' },
             ].map(({ label, value, color }) => (
               <div key={label} className="glass-card p-3 text-center">
                 <div className="text-[9px] font-mono uppercase tracking-wider text-[#3d5a73] mb-1">{label}</div>
@@ -654,7 +654,7 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (us
           {(['login', 'register'] as const).map((m) => (
             <button key={m} onClick={() => setMode(m)}
               className={`flex-1 py-2 rounded-md text-xs font-bold font-mono transition-all ${mode === m ? 'bg-[#00d4ff]/15 text-[#00d4ff] border border-[#00d4ff]/30' : 'text-[#8ba3be] hover:text-[#e8f4ff]'}`}>
-              {m === 'login' ? 'Entrar' : 'Registar'}
+              {m === 'login' ? t.common.login : t.common.register}
             </button>
           ))}
         </div>
@@ -733,7 +733,7 @@ function AddPairModal({ watchlist, onAdd, onClose }: { watchlist: string[]; onAd
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Pesquisar par..."
+          placeholder={t.common.search_pair}
           className="w-full bg-[#071524] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm font-mono text-[#e8f4ff] focus:border-[#00d4ff] outline-none mb-3"
         />
         <div className="space-y-1 max-h-64 overflow-y-auto">
@@ -1057,7 +1057,7 @@ export default function Home() {
                 </div>
                 <button onClick={handleLogout}
                   className="w-8 h-8 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#ff4466] hover:border-[#ff4466]/30 transition-all"
-                  title="Sair">
+                  title={t.common.logout}>
                   <LogOut size={14} />
                 </button>
               </div>
@@ -1104,13 +1104,13 @@ export default function Home() {
               {/* Market metrics */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 <MetricCard label={t.dashboard.market_cap} value={fmtLargeNum(overview?.total_market_cap_usd)}
-                  sub="Mercado cripto total" icon={PieChart} color="#00d4ff" change={overview?.market_cap_change_24h} />
+                  sub={t.dashboard.market_cap_sub} icon={PieChart} color="#00d4ff" change={overview?.market_cap_change_24h} />
                 <MetricCard label={t.dashboard.volume_24h} value={fmtLargeNum(overview?.total_volume_24h)}
-                  sub="Volume negociação 24h" icon={Activity} color="#b366ff" />
+                  sub={t.dashboard.volume_sub} icon={Activity} color="#b366ff" />
                 <MetricCard label={t.dashboard.btc_dominance} value={`${overview?.btc_dominance || 0}%`}
                   sub={`ETH: ${overview?.eth_dominance || 0}%`} icon={Shield} color="#ffcc00" />
-                <MetricCard label="Criptos Ativas" value={(overview?.active_cryptocurrencies || 0).toLocaleString()}
-                  sub="Ativos listados" icon={Globe} color="#00ff88" />
+                <MetricCard label={t.dashboard.active_cryptos} value={(overview?.active_cryptocurrencies || 0).toLocaleString()}
+                  sub={t.dashboard.active_cryptos_sub} icon={Globe} color="#00ff88" />
                 {fearGreed && <FearGreedGauge value={fearGreed.value} label={fearGreed.classification} />}
               </div>
 
@@ -1141,7 +1141,7 @@ export default function Home() {
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="border-b border-[#071524]">
-                          {['#', 'Ativo', 'Preço', '24h', '7d', 'Cap.'].map((h) => (
+                          {[t.common.rank, t.common.asset, t.common.price, t.common.change_24h, t.common.change_7d, t.common.market_cap_col].map((h) => (
                             <th key={h} className="text-left p-3 font-mono text-[#3d5a73] font-medium">{h}</th>
                           ))}
                         </tr>
@@ -1202,7 +1202,7 @@ export default function Home() {
                   <div className="glass-card p-4">
                     <div className="flex items-center gap-2 mb-3">
                       <Zap size={14} className="text-[#00d4ff]" />
-                      <span className="text-sm font-bold">Análise Rápida</span>
+                      <span className="text-sm font-bold">{t.scanner.analyze}</span>
                     </div>
                     <select value={selectedPair} onChange={(e) => setSelectedPair(e.target.value)}
                       className="w-full bg-[#020b14] border border-[#1a3a5c] rounded-lg px-3 py-2 text-sm font-mono text-[#e8f4ff] mb-2 focus:border-[#00d4ff] outline-none">
@@ -1220,7 +1220,7 @@ export default function Home() {
                       className="w-full py-2.5 rounded-lg font-bold text-sm transition-all disabled:opacity-40 flex items-center justify-center gap-2"
                       style={{ background: 'linear-gradient(135deg, #00d4ff22, #0099bb22)', border: '1px solid #00d4ff44', color: '#00d4ff' }}>
                       {isLoadingSignal ? <RefreshCw size={14} className="animate-spin" /> : <Brain size={14} />}
-                      {isLoadingSignal ? 'Analisando...' : 'Obter Sinal IA'}
+                      {isLoadingSignal ? t.scanner.analyzing : t.scanner.analyze}
                     </button>
                   </div>
                 </div>
@@ -1254,9 +1254,9 @@ export default function Home() {
               {/* Stats — sempre visíveis */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
-                  { label: t.scanner.scanned, value: scanResults.length > 0 ? PAIRS.length : PAIRS.length, color: '#00d4ff', sub: `${PAIRS.length} pares disponíveis` },
-                  { label: t.scanner.actionable, value: scanResults.filter((s: any) => s.bias !== 'WAIT').length || '—', color: '#00ff88', sub: scanResults.length > 0 ? 'sinais ativos' : 'clique em Escanear' },
-                  { label: 'Melhor Nota', value: scanResults[0]?.quality?.grade || '—', color: '#b366ff', sub: scanResults.length > 0 ? scanResults[0]?.pair : 'após scan' },
+                  { label: t.scanner.scanned, value: scanResults.length > 0 ? PAIRS.length : PAIRS.length, color: '#00d4ff', sub: `${PAIRS.length} ${t.scanner.pairs_available}` },
+                  { label: t.scanner.actionable, value: scanResults.filter((s: any) => s.bias !== 'WAIT').length || '—', color: '#00ff88', sub: scanResults.length > 0 ? t.scanner.active_signals : t.scanner.click_scan },
+                  { label: t.scanner.best_signal, value: scanResults[0]?.quality?.grade || '—', color: '#b366ff', sub: scanResults.length > 0 ? scanResults[0]?.pair : t.scanner.after_scan },
                 ].map(({ label, value, color, sub }) => (
                   <div key={label} className="glass-card p-4 text-center">
                     <div className="text-[9px] font-mono uppercase tracking-wider text-[#3d5a73] mb-1">{label}</div>
@@ -1269,7 +1269,7 @@ export default function Home() {
               {/* Pares monitorados */}
               {scanResults.length === 0 && !isScanning && (
                 <div className="glass-card p-4">
-                  <div className="text-[10px] font-mono uppercase tracking-wider text-[#3d5a73] mb-3">Pares a monitorizar</div>
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-[#3d5a73] mb-3">{t.scanner.pairs_monitoring}</div>
                   <div className="flex flex-wrap gap-2">
                     {PAIRS.map((pair) => {
                       const coin = (coins || []).find((c: any) => c.symbol?.toUpperCase() === pair.split('/')[0])
@@ -1293,7 +1293,7 @@ export default function Home() {
               {isScanning ? (
                 <div className="glass-card p-8 flex flex-col items-center justify-center gap-3">
                   <div className="w-12 h-12 rounded-full border-2 border-[#00d4ff]/30 border-t-[#00d4ff] animate-spin" />
-                  <div className="text-sm font-mono text-[#8ba3be]">A escanear {PAIRS.length} pares com IA...</div>
+                  <div className="text-sm font-mono text-[#8ba3be]">{t.scanner.scanning_pairs.replace('{n}', String(PAIRS.length))}</div>
                 </div>
               ) : scanResults.length > 0 ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -1305,7 +1305,7 @@ export default function Home() {
                   ))}
                   {scanResults.filter((s: any) => s.bias === 'WAIT').length > 0 && (
                     <div className="glass-card p-4 text-center text-sm text-[#3d5a73] font-mono col-span-full">
-                      + {scanResults.filter((s: any) => s.bias === 'WAIT').length} pares em modo AGUARDAR
+                      {t.scanner.wait_pairs.replace('{n}', String(scanResults.filter((s: any) => s.bias === 'WAIT').length))}
                     </div>
                   )}
                 </div>
@@ -1334,7 +1334,7 @@ export default function Home() {
                   className="flex items-center gap-2 px-5 py-2 rounded-lg font-bold text-sm transition-all disabled:opacity-40"
                   style={{ background: '#00d4ff15', border: '1px solid #00d4ff40', color: '#00d4ff' }}>
                   {isLoadingSignal ? <RefreshCw size={14} className="animate-spin" /> : <Brain size={14} />}
-                  {isLoadingSignal ? 'Analisando...' : t.scanner.analyze}
+                  {isLoadingSignal ? t.scanner.analyzing : t.scanner.analyze}
                 </button>
                 {prices[selectedPair] && (
                   <div className="ml-auto flex items-center gap-2 px-3 py-2 rounded-lg bg-[#071524] border border-[#1a3a5c]">
@@ -1368,7 +1368,7 @@ export default function Home() {
               {isLoadingSignal ? (
                 <div className="glass-card p-8 flex flex-col items-center gap-3">
                   <div className="w-12 h-12 rounded-full border-2 border-[#00d4ff]/30 border-t-[#00d4ff] animate-spin" />
-                  <div className="text-sm font-mono text-[#8ba3be]">IA analisando {selectedPair} {selectedTf}...</div>
+                  <div className="text-sm font-mono text-[#8ba3be]">{t.scanner.scanning_pairs.replace('{n}', `${selectedPair} ${selectedTf}`)}</div>
                 </div>
               ) : signalError ? (
                 <div className="glass-card p-8 flex flex-col items-center gap-3 border border-red-500/30">
@@ -1382,7 +1382,7 @@ export default function Home() {
               ) : (
                 <div className="glass-card p-12 text-center">
                   <Zap size={40} className="text-[#1a3a5c] mx-auto mb-3" />
-                  <div className="text-sm text-[#3d5a73] font-mono">Seleciona um par e timeframe, depois clica em Analisar</div>
+                  <div className="text-sm text-[#3d5a73] font-mono">{t.scanner.select_pair_hint}</div>
                 </div>
               )}
             </motion.div>
@@ -1400,9 +1400,9 @@ export default function Home() {
           {activeTab === 'history' && (
             <motion.div key="history" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
               <div className="flex items-center justify-between">
-                <h1 className="text-lg font-bold">Histórico de Sinais</h1>
+                <h1 className="text-lg font-bold">{t.history.title}</h1>
                 <div className="text-[10px] font-mono text-[#3d5a73]">
-                  Sinais LONG/SHORT guardados automaticamente · outcomes verificados após cada janela
+                  {t.history.subtitle}
                 </div>
               </div>
               <HistoryPanel />
@@ -1416,25 +1416,25 @@ export default function Home() {
                 <div>
                   <h1 className="text-lg font-bold">{t.nav.watchlist}</h1>
                   <div className="text-xs font-mono text-[#3d5a73] mt-0.5">
-                    {watchlist.length} {watchlist.length === 1 ? 'par' : 'pares'} guardados
+                    {watchlist.length} {watchlist.length === 1 ? t.watchlist.pair : t.watchlist.pairs} {t.watchlist.pairs_saved.replace('{n}', '')}
                   </div>
                 </div>
                 <button onClick={() => setShowAddPairModal(true)}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all"
                   style={{ background: '#00ff8815', border: '1px solid #00ff8840', color: '#00ff88' }}>
                   <Plus size={14} />
-                  Adicionar par
+                  {t.watchlist.add_pair}
                 </button>
               </div>
 
               {watchlist.length === 0 ? (
                 <div className="glass-card p-12 text-center">
                   <Star size={40} className="text-[#1a3a5c] mx-auto mb-3" />
-                  <div className="text-sm font-bold text-[#3d5a73] mb-2">Sem favoritos ainda</div>
-                  <div className="text-xs text-[#3d5a73] font-mono mb-4">Clica em "Adicionar par" para começar</div>
+                  <div className="text-sm font-bold text-[#3d5a73] mb-2">{t.watchlist.empty_title}</div>
+                  <div className="text-xs text-[#3d5a73] font-mono mb-4">{t.watchlist.empty_hint}</div>
                   <button onClick={() => setShowAddPairModal(true)}
                     className="px-4 py-2 rounded-lg text-xs font-bold font-mono text-[#00d4ff] border border-[#00d4ff]/30 hover:bg-[#00d4ff]/10 transition-all">
-                    + Adicionar primeiro par
+                    {t.watchlist.add_first}
                   </button>
                 </div>
               ) : (
@@ -1457,7 +1457,7 @@ export default function Home() {
                           </div>
                           <button onClick={() => removeFromWatchlist(pair)}
                             className="p-1.5 rounded-md transition-all text-[#ffcc00] hover:text-[#ff4466] hover:bg-[#ff4466]/10"
-                            title="Remover dos favoritos">
+                            title={t.watchlist.remove_tooltip}>
                             <Star size={14} fill="currentColor" />
                           </button>
                         </div>
@@ -1472,12 +1472,12 @@ export default function Home() {
                         </div>
                         {coin && (
                           <div className="text-[10px] font-mono text-[#3d5a73] mb-3">
-                            Cap: {fmtLargeNum(coin.market_cap)}
+                            {t.watchlist.market_cap}: {fmtLargeNum(coin.market_cap)}
                           </div>
                         )}
                         <button onClick={() => { setSelectedPair(pair); handleAnalyze() }}
                           className="w-full py-1.5 rounded-md text-xs font-bold font-mono text-[#00d4ff] border border-[#00d4ff]/20 hover:bg-[#00d4ff]/10 transition-all">
-                          Analisar
+                          {t.watchlist.analyze}
                         </button>
                       </div>
                     )
@@ -1489,7 +1489,7 @@ export default function Home() {
                     <div className="w-10 h-10 rounded-full border border-[#1a3a5c] flex items-center justify-center">
                       <Plus size={18} className="text-[#3d5a73]" />
                     </div>
-                    <span className="text-xs font-mono text-[#3d5a73]">Adicionar par</span>
+                    <span className="text-xs font-mono text-[#3d5a73]">{t.watchlist.add_pair}</span>
                   </button>
                 </div>
               )}
@@ -1512,7 +1512,7 @@ export default function Home() {
                           : f === 'negative' ? 'bg-[#ff4466]/15 text-[#ff4466] border border-[#ff4466]/30'
                           : 'bg-[#00d4ff]/15 text-[#00d4ff] border border-[#00d4ff]/30'
                         : 'text-[#8ba3be] border border-[#1a3a5c] hover:border-[#00d4ff]/20'}`}>
-                      {f === 'all' ? 'Todas' : f === 'positive' ? 'Positivas' : 'Negativas'}
+                      {f === 'all' ? t.news.filter_all : f === 'positive' ? t.news.filter_positive : t.news.filter_negative}
                     </button>
                   ))}
                   <button onClick={loadNews} disabled={newsLoading}
@@ -1525,7 +1525,7 @@ export default function Home() {
               {newsLoading ? (
                 <div className="glass-card p-12 flex flex-col items-center gap-3">
                   <div className="w-10 h-10 rounded-full border-2 border-[#00d4ff]/30 border-t-[#00d4ff] animate-spin" />
-                  <div className="text-sm font-mono text-[#8ba3be]">A carregar notícias...</div>
+                  <div className="text-sm font-mono text-[#8ba3be]">{t.news.loading}</div>
                 </div>
               ) : filteredNews.length > 0 ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1536,8 +1536,8 @@ export default function Home() {
               ) : (
                 <div className="glass-card p-12 text-center">
                   <Newspaper size={40} className="text-[#1a3a5c] mx-auto mb-3" />
-                  <div className="text-sm font-bold text-[#3d5a73] mb-1">Sem notícias disponíveis</div>
-                  <div className="text-xs text-[#3d5a73] font-mono">Clica em atualizar para carregar</div>
+                  <div className="text-sm font-bold text-[#3d5a73] mb-1">{t.news.empty_title}</div>
+                  <div className="text-xs text-[#3d5a73] font-mono">{t.news.empty_hint}</div>
                 </div>
               )}
             </motion.div>
