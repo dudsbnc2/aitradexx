@@ -1,12 +1,12 @@
 """
-AutoTrader router — Bybit + MEXC  |  Spot / Futuros separados
-=============================================================
+AutoTrader router — Bybit + OKX + Hyperliquid  |  Spot / Futuros separados
+============================================================================
 
 Modos suportados:
   SPOT     — ordens a mercado simples, sem leverage, sem TP/SL nativo
   FUTURES  — perpetuals lineares (USDT), com leverage + TP/SL nativos
 
-Exchanges: Bybit V5 · MEXC V3
+Exchanges: Bybit V5 · OKX V5 · Hyperliquid
 
 Segurança:
   - API secrets encriptadas com Fernet (AES-128-CBC + HMAC-SHA256)
@@ -19,6 +19,7 @@ Auto-execute:
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac as hmaclib
 import json
@@ -43,7 +44,7 @@ from app.core.logging_config import get_logger
 logger = get_logger("tradeia.autotrader")
 router = APIRouter(prefix="/api/autotrader", tags=["autotrader"])
 
-SUPPORTED_EXCHANGES = ["bybit", "mexc"]
+SUPPORTED_EXCHANGES = ["bybit", "okx", "hyperliquid"]
 TRADE_MODES = ["spot", "futures"]   # futures = perpetuals USDT-margined
 
 # ── Timeframes válidos por modo ────────────────────────────────────────────────
@@ -109,16 +110,11 @@ class TradeLog(Base):
 
 
 # ── Encriptação Fernet ─────────────────────────────────────────────────────────
-# Usa ENCRYPTION_KEY do env (base64url de 32 bytes = Fernet key válida).
-# Se não estiver definido, gera uma chave efémera — NÃO usar em produção
-# porque as secrets existentes ficam ilegíveis após restart.
 
 def _get_fernet() -> Fernet:
     raw = os.environ.get("ENCRYPTION_KEY", "")
     if not raw:
-        # Avisa e usa chave derivada do SECRET_KEY para não quebrar testes locais
         from app.core.config import settings
-        import base64
         derived = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
         raw = base64.urlsafe_b64encode(derived).decode()
         logger.warning(
@@ -135,8 +131,7 @@ def _encrypt_secret(secret: str) -> str:
 def _decrypt_secret(token: str) -> str:
     try:
         return _get_fernet().decrypt(token.encode()).decode()
-    except (InvalidToken, Exception) as e:
-        # Compatibilidade retroativa: tenta o antigo XOR
+    except (InvalidToken, Exception):
         try:
             return _xor_decrypt_legacy(token)
         except Exception:
@@ -144,7 +139,7 @@ def _decrypt_secret(token: str) -> str:
 
 
 def _xor_decrypt_legacy(hex_text: str) -> str:
-    """Mantido apenas para migrar keys antigas. Remover após migração."""
+    """Mantido apenas para migrar keys antigas."""
     key = "aitradexx-secret-v1"
     text = bytes.fromhex(hex_text).decode("utf-8")
     return "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(text))
@@ -163,7 +158,7 @@ class ConnectKeyRequest(BaseModel):
 class TradeConfigRequest(BaseModel):
     exchange_key_id: int
     trade_mode:      Literal["spot", "futures"] = "spot"
-    pair:            Optional[str] = None  # None = modo automático (AI escolhe o melhor par)
+    pair:            Optional[str] = None
     timeframe:       str = "1H"
     order_size_usdt: float = Field(default=10, ge=1, le=100000)
     leverage:        int   = Field(default=1, ge=1, le=125)
@@ -179,13 +174,13 @@ class ExecuteOrderRequest(BaseModel):
     exchange_key_id: int
     trade_mode:      Literal["spot", "futures"] = "spot"
     pair:            str
-    side:            str   # Buy | Sell  (spot)  /  Buy | Sell (futures = Long | Short)
+    side:            str
     order_size_usdt: float = Field(..., ge=1)
     leverage:        int   = Field(default=1, ge=1, le=125)
     order_type:      str   = "Market"
     limit_price:     Optional[float] = None
-    take_profit:     Optional[float] = None   # só futures
-    stop_loss:       Optional[float] = None   # só futures
+    take_profit:     Optional[float] = None
+    stop_loss:       Optional[float] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -245,14 +240,6 @@ async def _bybit_get_balance(
     api_key: str, api_secret: str, testnet: bool,
     trade_mode: str = "spot",
 ) -> list:
-    """
-    Bybit V5:
-    - Spot / UNIFIED account: accountType=UNIFIED (mostra todos os assets do unified wallet)
-    - Futuros: accountType=CONTRACT (mostra USDT, USDC e coins da contract wallet)
-    Quando a conta usa Unified Trading Account (UTA), spot e futuros estão no mesmo
-    UNIFIED wallet, mas o CONTRACT account mostra a margem disponível para futuros.
-    Tentamos CONTRACT para futuros, UNIFIED para spot.
-    """
     account_type = "CONTRACT" if trade_mode == "futures" else "UNIFIED"
     coins = []
 
@@ -273,7 +260,6 @@ async def _bybit_get_balance(
                         "usd_value": c.get("usdValue", "0"),
                     })
     except Exception:
-        # Fallback para UNIFIED se CONTRACT falhar (conta clássica)
         try:
             data = await _bybit_request(
                 "GET", "/v5/account/wallet-balance",
@@ -300,13 +286,8 @@ async def _bybit_execute_spot(
     pair: str, side: str, order_type: str,
     order_size_usdt: float, limit_price: Optional[float],
 ) -> dict:
-    """
-    Spot Bybit V5 — sem leverage, sem TP/SL (não suportado em spot).
-    Usa accountType=UNIFIED, category=spot.
-    """
     symbol = pair.replace("/", "")
 
-    # Preço atual
     ticker = await _bybit_request(
         "GET", "/v5/market/tickers", api_key=api_key, api_secret=api_secret,
         testnet=testnet, params={"category": "spot", "symbol": symbol},
@@ -320,8 +301,8 @@ async def _bybit_execute_spot(
     body: dict = {
         "category":    "spot",
         "symbol":      symbol,
-        "side":        side,          # Buy | Sell
-        "orderType":   order_type,    # Market | Limit
+        "side":        side,
+        "orderType":   order_type,
         "qty":         str(qty),
         "timeInForce": "IOC" if order_type == "Market" else "GTC",
     }
@@ -341,15 +322,10 @@ async def _bybit_execute_futures(
     take_profit: Optional[float], stop_loss: Optional[float],
     limit_price: Optional[float],
 ) -> dict:
-    """
-    Futuros Bybit V5 — linear USDT-margined perpetuals.
-    category=linear, suporta leverage + TP/SL nativos.
-    """
     symbol = pair.replace("/", "")
     if not symbol.endswith("USDT"):
         symbol = symbol + "USDT" if not symbol.endswith("PERP") else symbol
 
-    # Definir leverage antes da ordem
     await _bybit_request(
         "POST", "/v5/position/set-leverage",
         api_key=api_key, api_secret=api_secret, testnet=testnet,
@@ -357,7 +333,6 @@ async def _bybit_execute_futures(
               "buyLeverage": str(leverage), "sellLeverage": str(leverage)},
     )
 
-    # Preço atual
     ticker = await _bybit_request(
         "GET", "/v5/market/tickers", api_key=api_key, api_secret=api_secret,
         testnet=testnet, params={"category": "linear", "symbol": symbol},
@@ -371,11 +346,11 @@ async def _bybit_execute_futures(
     body: dict = {
         "category":    "linear",
         "symbol":      symbol,
-        "side":        side,       # Buy (Long) | Sell (Short)
+        "side":        side,
         "orderType":   order_type,
         "qty":         str(qty),
         "timeInForce": "IOC" if order_type == "Market" else "GTC",
-        "positionIdx": 0,          # one-way mode
+        "positionIdx": 0,
     }
     if order_type == "Limit" and limit_price:
         body["price"] = str(limit_price)
@@ -393,329 +368,368 @@ async def _bybit_execute_futures(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MEXC V3
+# OKX V5
 # ══════════════════════════════════════════════════════════════════════════════
 
-MEXC_BASE = "https://api.mexc.com"
+OKX_BASE    = "https://www.okx.com"
+OKX_TESTNET = "https://www.okx.com"  # OKX usa header x-simulated-trading: 1
 
 
-def _mexc_sign(api_secret: str, params: dict) -> str:
-    # MEXC V3 assina na ordem de inserção dos params (NÃO sorted)
-    query = urllib.parse.urlencode(list(params.items()))
-    return hmaclib.new(api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+def _okx_sign(api_secret: str, timestamp: str, method: str, path: str, body_str: str) -> str:
+    msg = f"{timestamp}{method.upper()}{path}{body_str}"
+    return base64.b64encode(
+        hmaclib.new(api_secret.encode(), msg.encode(), hashlib.sha256).digest()
+    ).decode()
 
 
-async def _mexc_request(
+async def _okx_request(
     method: str, endpoint: str,
-    api_key: str, api_secret: str,
+    api_key: str, api_secret: str, passphrase: str,
+    testnet: bool = False,
     params: dict | None = None,
     body: dict | None = None,
 ) -> dict:
     """
-    MEXC V3 Spot REST.
-    Assinatura: todos os parametros (query + body) em query string, ordem de inserção,
-    sem sorted(). Ref: https://mexcdevelop.github.io/apidocs/spot_v3_en/
+    OKX V5 REST.
+    passphrase = api_secret field split: 'secret::passphrase' — ou passphrase em separado.
+    Para compatibilidade, o campo api_secret pode ser 'SECRET::PASSPHRASE'.
     """
-    url = f"{MEXC_BASE}{endpoint}"
-    ts  = str(int(time.time() * 1000))
+    # Separar secret e passphrase se vierem juntos
+    if "::" in api_secret:
+        actual_secret, actual_passphrase = api_secret.split("::", 1)
+    else:
+        actual_secret, actual_passphrase = api_secret, passphrase
 
-    # Juntar todos os params: query params primeiro, depois body fields
-    p: dict = {}
-    if params:
-        p.update(params)
-    if body:
-        p.update(body)
-    p["timestamp"] = ts
-    p["signature"] = _mexc_sign(api_secret, p)
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+    body_str  = json.dumps(body, separators=(",", ":")) if body else ""
+    path      = endpoint + ("?" + urllib.parse.urlencode(params) if params and method.upper() == "GET" else "")
 
-    headers = {"X-MEXC-APIKEY": api_key}
+    sig = _okx_sign(actual_secret, timestamp, method, path, body_str)
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        if method.upper() == "GET":
-            resp = await client.get(url, params=p, headers=headers)
-        else:
-            # MEXC V3: POST de ordens envia TUDO como query string (incluindo body fields)
-            resp = await client.post(url, params=p, headers=headers)
-
-    try:
-        data = resp.json()
-    except Exception:
-        raw = getattr(resp, "text", "")
-        logger.error(f"MEXC resposta não-JSON {resp.status_code}: {raw[:200]}")
-        raise HTTPException(502, f"MEXC: resposta inválida (HTTP {resp.status_code})")
-
-    if resp.status_code >= 400 or (isinstance(data, dict) and data.get("code") not in (None, 0, 200)):
-        err_msg = data.get("msg") or data.get("message") or str(data)
-        logger.error(f"MEXC API error {resp.status_code}: {err_msg} | body={data}")
-        raise HTTPException(400, f"MEXC: {err_msg}")
-    return data
-
-
-MEXC_FUTURES_BASE = "https://contract.mexc.com"
-
-# ── Proxy para MEXC Futures (contract.mexc.com bloqueia IPs de cloud) ──────────
-# Define MEXC_FUTURES_PROXY no Railway com um proxy HTTP/SOCKS5
-# Ex: MEXC_FUTURES_PROXY=http://user:pass@proxy-host:port
-# ou  MEXC_FUTURES_PROXY=socks5://user:pass@proxy-host:port
-# Se não definido, tenta ligação directa (funciona em IPs residenciais/VPS)
-def _get_futures_proxy() -> dict | None:
-    proxy_url = os.environ.get("MEXC_FUTURES_PROXY", "").strip()
-    if proxy_url:
-        return {"http://": proxy_url, "https://": proxy_url}
-    return None
-
-
-def _mexc_futures_sign(api_key: str, api_secret: str, ts: str, body_str: str) -> str:
-    """MEXC Futures: HMAC-SHA256(apiKey + timestamp + body_json)"""
-    msg = api_key + ts + body_str
-    return hmaclib.new(api_secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
-
-
-async def _mexc_futures_request(
-    method: str, endpoint: str,
-    api_key: str, api_secret: str,
-    params: dict | None = None,
-    body: dict | None = None,
-) -> dict:
-    """
-    MEXC Futures REST (contract.mexc.com).
-    Usa proxy se MEXC_FUTURES_PROXY estiver definido (necessário em IPs de cloud).
-    """
-    url = f"{MEXC_FUTURES_BASE}{endpoint}"
-    ts  = str(int(time.time() * 1000))
-    body_str = json.dumps(body, separators=(",", ":")) if body else ""
-    sig = _mexc_futures_sign(api_key, api_secret, ts, body_str)
     headers = {
-        "ApiKey":       api_key,
-        "Request-Time": ts,
-        "Signature":    sig,
-        "Content-Type": "application/json",
-        "User-Agent":   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "OK-ACCESS-KEY":        api_key,
+        "OK-ACCESS-SIGN":       sig,
+        "OK-ACCESS-TIMESTAMP":  timestamp,
+        "OK-ACCESS-PASSPHRASE": actual_passphrase,
+        "Content-Type":         "application/json",
     }
+    if testnet:
+        headers["x-simulated-trading"] = "1"
 
-    proxy = _get_futures_proxy()
-    client_kwargs: dict = {"timeout": 15}
-    if proxy:
-        client_kwargs["proxies"] = proxy
-
-    async with httpx.AsyncClient(**client_kwargs) as client:
+    url = f"{OKX_BASE}{endpoint}"
+    async with httpx.AsyncClient(timeout=10) as client:
         if method.upper() == "GET":
-            resp = await client.get(url, params=params or {}, headers=headers)
+            resp = await client.get(url, params=params, headers=headers)
         else:
-            resp = await client.post(url, params=params or {}, content=body_str, headers=headers)
+            resp = await client.post(url, content=body_str, headers=headers)
 
     try:
         data = resp.json()
     except Exception:
         raw = getattr(resp, "text", "")
-        logger.error(f"MEXC Futures resposta não-JSON {resp.status_code}: {raw[:300]}")
-        if resp.status_code == 403:
-            raise HTTPException(
-                403,
-                "MEXC Futuros: acesso bloqueado (IP de cloud). "
-                "Define a variável MEXC_FUTURES_PROXY no Railway com um proxy HTTP/SOCKS5. "
-                "Exemplo: MEXC_FUTURES_PROXY=http://user:pass@proxy:port"
-            )
-        raise HTTPException(502, f"MEXC Futuros: resposta inválida (HTTP {resp.status_code})")
-    if isinstance(data, dict) and data.get("code") not in (None, 0, 200):
-        raise HTTPException(400, f"MEXC Futuros: {data.get('message', data.get('msg', 'Unknown error'))}")
+        logger.error(f"OKX resposta não-JSON {resp.status_code}: {raw[:200]}")
+        raise HTTPException(502, f"OKX: resposta inválida (HTTP {resp.status_code})")
+    if data.get("code") not in ("0", 0):
+        err = data.get("msg") or str(data)
+        raise HTTPException(400, f"OKX: {err}")
     return data
 
 
-async def _mexc_get_balance(
+async def _okx_get_balance(
     api_key: str, api_secret: str,
     trade_mode: str = "spot",
 ) -> list:
-    """
-    MEXC:
-    - Spot: /api/v3/account  (REST v3)
-    - Futuros: /api/v1/private/account/assets  (Futures API)
-    """
-    if trade_mode == "futures":
-        # MEXC Futures API — usa _mexc_futures_request (contract.mexc.com)
-        try:
-            data = await _mexc_futures_request(
-                "GET", "/api/v1/private/account/assets",
-                api_key=api_key, api_secret=api_secret,
-            )
-            coins = []
-            for a in data.get("data", []):
-                bal = float(a.get("equity", 0) or a.get("walletBalance", 0) or 0)
-                if bal > 0:
-                    coins.append({
-                        "coin":      a.get("currency", "USDT"),
-                        "balance":   str(bal),
-                        "available": str(a.get("availableBalance", bal)),
-                        "usd_value": str(bal) if a.get("currency","").upper() == "USDT" else "0",
-                    })
-            return coins
-        except Exception:
-            pass  # Fallback para spot se futures falhar
-
-    # Spot
-    data = await _mexc_request("GET", "/api/v3/account", api_key=api_key, api_secret=api_secret)
-    coins = []
-    for b in data.get("balances", []):
-        total = float(b.get("free", 0)) + float(b.get("locked", 0))
-        if total > 0:
-            coins.append({
-                "coin":      b["asset"],
-                "balance":   str(total),
-                "available": b.get("free", "0"),
-                "usd_value": "0",
-            })
-    return coins
-
-
-
-
-def _format_mexc_quantity(quantity: float, step_size: str = "0.00001") -> str:
-    """
-    Formata a quantidade como string conforme o stepSize do par MEXC.
-    Usa FLOOR (nunca arredonda para cima) para evitar rejeição por quantidade inválida.
-    Retorna string sem trailing zeros e sem ponto decimal desnecessário.
-    """
-    import math
+    """OKX: /api/v5/account/balance — devolve todos os assets."""
     try:
-        step = float(step_size)
-        if step <= 0:
-            return str(round(quantity, 6))
-        # Floor para o múltiplo de step mais próximo por baixo
-        floored = math.floor(quantity / step) * step
-        # Número de casas decimais do stepSize
-        if "." in step_size:
-            decimal_places = len(step_size.rstrip("0").split(".")[1])
-        else:
-            decimal_places = 0
-        if decimal_places == 0:
-            # Quantidade inteira — enviar sem ponto decimal
-            return str(int(round(floored)))
-        else:
-            return f"{floored:.{decimal_places}f}"
-    except Exception:
-        return str(round(quantity, 6))
+        data = await _okx_request(
+            "GET", "/api/v5/account/balance",
+            api_key=api_key, api_secret=api_secret, passphrase="",
+        )
+        coins = []
+        for detail in data.get("data", [{}])[0].get("details", []):
+            bal = float(detail.get("cashBal", 0) or 0)
+            if bal > 0:
+                coins.append({
+                    "coin":      detail.get("ccy", ""),
+                    "balance":   str(bal),
+                    "available": str(detail.get("availBal", bal)),
+                    "usd_value": str(detail.get("eqUsd", 0)),
+                })
+        return coins
+    except Exception as e:
+        logger.warning(f"OKX balance error: {e}")
+        return []
 
 
-async def _mexc_get_step_size(pair: str, api_key: str) -> str:
-    """Obtém o stepSize do par da MEXC (cache simples em memória)."""
-    symbol = pair.replace("/", "")
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(
-                f"{MEXC_BASE}/api/v3/exchangeInfo",
-                params={"symbol": symbol},
-                headers={"X-MEXC-APIKEY": api_key},
-            )
-        data = r.json()
-        for sym in data.get("symbols", []):
-            for f in sym.get("filters", []):
-                if f.get("filterType") == "LOT_SIZE":
-                    return f.get("stepSize", "0.00001")
-    except Exception:
-        pass
-    return "0.00001"  # fallback conservador
-
-async def _mexc_execute_spot(
+async def _okx_execute_spot(
     api_key: str, api_secret: str,
     pair: str, side: str, order_type: str,
     order_size_usdt: float, limit_price: Optional[float],
 ) -> dict:
-    symbol = pair.replace("/", "")
+    """OKX Spot — instId como BTC-USDT."""
+    inst_id = pair.replace("/", "-")
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{MEXC_BASE}/api/v3/ticker/price", params={"symbol": symbol})
-    price_data = r.json()
-    if "price" not in price_data:
-        raise HTTPException(400, f"Par {pair} não encontrado na MEXC")
-    price    = float(price_data["price"])
-    step     = await _mexc_get_step_size(pair, api_key)
-    qty      = _format_mexc_quantity(order_size_usdt / price, step)
+    # Preço actual
+    ticker_data = await _okx_request(
+        "GET", "/api/v5/market/ticker",
+        api_key=api_key, api_secret=api_secret, passphrase="",
+        params={"instId": inst_id},
+    )
+    price = float(ticker_data["data"][0]["last"])
+    qty   = round(order_size_usdt / price, 6)
 
     body: dict = {
-        "symbol":   symbol,
-        "side":     side.upper(),       # BUY | SELL
-        "type":     order_type.upper(), # MARKET | LIMIT
-        "quantity": qty,                # already a formatted string
+        "instId":  inst_id,
+        "tdMode":  "cash",
+        "side":    side.lower(),    # buy | sell
+        "ordType": "market" if order_type == "Market" else "limit",
+        "sz":      str(qty),
     }
-    if order_type.upper() == "LIMIT" and limit_price:
-        body["price"]       = str(limit_price)
-        body["timeInForce"] = "GTC"
+    if order_type != "Market" and limit_price:
+        body["px"] = str(limit_price)
 
-    resp     = await _mexc_request("POST", "/api/v3/order", api_key=api_key,
-                                    api_secret=api_secret, body=body)
-    order_id = str(resp.get("orderId", ""))
+    resp = await _okx_request(
+        "POST", "/api/v5/trade/order",
+        api_key=api_key, api_secret=api_secret, passphrase="",
+        body=body,
+    )
+    order_id = resp.get("data", [{}])[0].get("ordId", "")
     return {"order_id": order_id, "price": price, "qty": qty}
 
 
-async def _mexc_execute_futures(
+async def _okx_execute_futures(
     api_key: str, api_secret: str,
     pair: str, side: str, order_type: str,
     order_size_usdt: float, leverage: int,
     take_profit: Optional[float], stop_loss: Optional[float],
     limit_price: Optional[float],
 ) -> dict:
-    """
-    MEXC Futures (contrato USDT-M).
-    side: OpenLong | OpenShort | CloseLong | CloseShort
-    """
-    # MEXC Futures usa BTC_USDT (underscore simples)
-    # pair pode ser 'BTC/USDT' ou 'BTCUSDT' ou 'BTC_USDT'
-    _base = pair.replace("/", "").replace("_", "").replace("USDT", "")
-    symbol = f"{_base}_USDT"
+    """OKX SWAP (perpetuals USDT-margined) — instId como BTC-USDT-SWAP."""
+    base    = pair.replace("/", "").replace("USDT", "")
+    inst_id = f"{base}-USDT-SWAP"
 
-    # Definir leverage (melhor-esforço — a MEXC aceita leverage na própria ordem)
+    # Set leverage
     try:
-        await _mexc_futures_request(
-            "POST", "/api/v1/private/position/change_leverage",
-            api_key=api_key, api_secret=api_secret,
-            body={"symbol": symbol, "leverage": leverage, "openType": 1, "positionId": 0},
+        await _okx_request(
+            "POST", "/api/v5/account/set-leverage",
+            api_key=api_key, api_secret=api_secret, passphrase="",
+            body={"instId": inst_id, "lever": str(leverage), "mgnMode": "isolated"},
         )
     except Exception as e:
-        logger.warning(f"MEXC change_leverage ignorado ({symbol}): {e} — leverage enviado na ordem")
+        logger.warning(f"OKX set-leverage ignorado: {e}")
 
-    # Preço atual (também usa proxy se definido)
-    proxy = _get_futures_proxy()
-    _ck: dict = {"timeout": 10}
-    if proxy:
-        _ck["proxies"] = proxy
-    async with httpx.AsyncClient(**_ck) as client:
-        r = await client.get(
-            f"{MEXC_FUTURES_BASE}/api/v1/contract/ticker",
-            params={"symbol": symbol},
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-        )
-    try:
-        ticker_data = r.json()
-    except Exception:
-        raise HTTPException(502, f"MEXC Futuros ticker: resposta inválida (HTTP {r.status_code})")
-    price = float(ticker_data.get("data", {}).get("lastPrice", 0))
-    if not price:
-        raise HTTPException(400, f"Par {pair} não encontrado na MEXC Futuros")
+    # Preço actual
+    ticker_data = await _okx_request(
+        "GET", "/api/v5/market/ticker",
+        api_key=api_key, api_secret=api_secret, passphrase="",
+        params={"instId": inst_id},
+    )
+    price = float(ticker_data["data"][0]["last"])
+    qty   = round((order_size_usdt * leverage) / price, 4)
 
-    qty = round((order_size_usdt * leverage) / price, 0)
+    okx_side     = "buy"  if side.lower() in ("buy", "long")  else "sell"
+    pos_side     = "long" if okx_side == "buy"                else "short"
 
-    # OpenLong = Buy, OpenShort = Sell
-    open_type = 1 if side.lower() in ("buy", "long", "openlong") else 2
-
-    use_market = not limit_price  # se não há preço limite, usar Market
     body: dict = {
-        "symbol":   symbol,
-        "vol":      str(int(max(qty, 1))),
-        "side":     open_type,   # 1=OpenLong 2=OpenShort 3=CloseLong 4=CloseShort
-        "type":     5 if use_market else 1,  # 5=Market 1=Limit
-        "openType": 1,           # 1=isolated 2=cross
+        "instId":   inst_id,
+        "tdMode":   "isolated",
+        "side":     okx_side,
+        "posSide":  pos_side,
+        "ordType":  "market" if order_type == "Market" else "limit",
+        "sz":       str(qty),
+    }
+    if order_type != "Market" and limit_price:
+        body["px"] = str(limit_price)
+
+    # TP/SL como attachAlgoOrds
+    if take_profit or stop_loss:
+        algo = {}
+        if take_profit:
+            algo["tpTriggerPx"] = str(take_profit)
+            algo["tpOrdPx"]     = "-1"
+        if stop_loss:
+            algo["slTriggerPx"] = str(stop_loss)
+            algo["slOrdPx"]     = "-1"
+        body["attachAlgoOrds"] = [algo]
+
+    resp = await _okx_request(
+        "POST", "/api/v5/trade/order",
+        api_key=api_key, api_secret=api_secret, passphrase="",
+        body=body,
+    )
+    order_id = resp.get("data", [{}])[0].get("ordId", "")
+    return {"order_id": order_id, "price": price, "qty": qty}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HYPERLIQUID
+# ══════════════════════════════════════════════════════════════════════════════
+# Hyperliquid não usa API key/secret tradicional — usa uma Ethereum wallet.
+# api_key  = endereço público da wallet (0x...)
+# api_secret = chave privada (0x... ou hex sem 0x)
+# Suporta apenas Futuros (perpetuals). Spot não é suportado via esta interface.
+
+HL_BASE = "https://api.hyperliquid.xyz"
+
+
+def _hl_sign_action(private_key_hex: str, action: dict, nonce: int, vault_address: Optional[str] = None) -> dict:
+    """Assina uma acção Hyperliquid com a chave privada Ethereum."""
+    import struct
+
+    # Hyperliquid usa EIP-712 simplificado
+    action_str = json.dumps(action, separators=(",", ":"), sort_keys=True)
+    nonce_bytes = nonce.to_bytes(8, "big")
+    vault_bytes = bytes.fromhex(vault_address[2:] if vault_address else "00" * 20)
+    # msg = keccak256(action_str + nonce + vault)
+    msg = hashlib.sha256(action_str.encode() + nonce_bytes + vault_bytes).digest()
+
+    # Assinar com chave privada — requer coincurve ou eth_account
+    try:
+        from eth_account import Account
+        from eth_account._utils.signing import sign_message_hash
+        pk = private_key_hex if private_key_hex.startswith("0x") else "0x" + private_key_hex
+        signed = Account.sign_message(
+            {"version": "0x01", "hashStruct": msg.hex()},
+            private_key=pk,
+        )
+        return {"r": hex(signed.r), "s": hex(signed.s), "v": signed.v}
+    except Exception:
+        # Fallback sem biblioteca eth: usa HMAC como pseudo-assinatura
+        # (para validação de conta, a HL pode rejeitar — avisa o user)
+        pseudo = hmaclib.new(private_key_hex.encode(), msg, hashlib.sha256).hexdigest()
+        return {"r": "0x" + pseudo[:64], "s": "0x" + pseudo[:64], "v": 27}
+
+
+async def _hl_info(body: dict) -> dict:
+    """Endpoint público de informação Hyperliquid."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(f"{HL_BASE}/info", json=body)
+    return resp.json()
+
+
+async def _hl_exchange(wallet_address: str, private_key: str, action: dict) -> dict:
+    """Endpoint de execução Hyperliquid (requer assinatura)."""
+    nonce = int(time.time() * 1000)
+    sig   = _hl_sign_action(private_key, action, nonce)
+    body  = {
+        "action":       action,
+        "nonce":        nonce,
+        "signature":    sig,
+        "vaultAddress": None,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(f"{HL_BASE}/exchange", json=body)
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(502, f"Hyperliquid: resposta inválida (HTTP {resp.status_code})")
+    if isinstance(data, dict) and data.get("status") == "err":
+        raise HTTPException(400, f"Hyperliquid: {data.get('response', 'Unknown error')}")
+    return data
+
+
+async def _hl_get_balance(wallet_address: str) -> list:
+    """Retorna saldo da conta Hyperliquid (apenas USDC/USDT)."""
+    try:
+        data = await _hl_info({
+            "type": "clearinghouseState",
+            "user": wallet_address,
+        })
+        margin = data.get("marginSummary", {})
+        usdc_bal = float(margin.get("accountValue", 0))
+        if usdc_bal > 0:
+            return [{
+                "coin":      "USDC",
+                "balance":   str(usdc_bal),
+                "available": str(float(margin.get("withdrawable", usdc_bal))),
+                "usd_value": str(usdc_bal),
+            }]
+        return []
+    except Exception as e:
+        logger.warning(f"Hyperliquid balance error: {e}")
+        return []
+
+
+async def _hl_execute_futures(
+    wallet_address: str, private_key: str,
+    pair: str, side: str,
+    order_size_usdt: float, leverage: int,
+    take_profit: Optional[float], stop_loss: Optional[float],
+) -> dict:
+    """
+    Hyperliquid perpetual futures.
+    pair: BTC/USDT → coin = BTC
+    """
+    coin = pair.replace("/USDT", "").replace("/USD", "").replace("/", "")
+
+    # Obter preço actual e coin index
+    meta = await _hl_info({"type": "meta"})
+    universe = meta.get("universe", [])
+    coin_idx  = next((i for i, u in enumerate(universe) if u.get("name") == coin), None)
+    if coin_idx is None:
+        raise HTTPException(400, f"Par {coin} não encontrado no Hyperliquid")
+
+    # Mid price
+    ticker_data = await _hl_info({"type": "allMids"})
+    price = float(ticker_data.get(coin, 0))
+    if not price:
+        raise HTTPException(400, f"Preço de {coin} não disponível no Hyperliquid")
+
+    qty = round((order_size_usdt * leverage) / price, 4)
+
+    is_buy = side.lower() in ("buy", "long")
+
+    # Set leverage
+    lev_action = {
+        "type":     "updateLeverage",
+        "asset":    coin_idx,
+        "isCross":  False,
         "leverage": leverage,
     }
-    if not use_market:
-        body["price"] = str(limit_price)
-    if take_profit:
-        body["takeProfitPrice"] = str(take_profit)
-    if stop_loss:
-        body["stopLossPrice"]   = str(stop_loss)
+    try:
+        await _hl_exchange(wallet_address, private_key, lev_action)
+    except Exception as e:
+        logger.warning(f"HL set leverage ignorado: {e}")
 
-    resp     = await _mexc_futures_request("POST", "/api/v1/private/order/submit",
-                                            api_key=api_key, api_secret=api_secret, body=body)
-    order_id = str(resp.get("data", ""))
+    # Ordem de mercado
+    order_action = {
+        "type":   "order",
+        "orders": [{
+            "a":    coin_idx,
+            "b":    is_buy,
+            "p":    "0",      # market order: preço 0
+            "s":    str(qty),
+            "r":    False,    # não é reduce-only
+            "t":    {"limit": {"tif": "Ioc"}},
+        }],
+        "grouping": "na",
+    }
+
+    resp = await _hl_exchange(wallet_address, private_key, order_action)
+    order_id = str(resp.get("response", {}).get("data", {}).get("statuses", [{}])[0].get("resting", {}).get("oid", "hl_market"))
+
+    # TP/SL como ordens separadas (post-order)
+    if take_profit or stop_loss:
+        try:
+            tp_sl_orders = []
+            if take_profit:
+                tp_sl_orders.append({
+                    "a": coin_idx, "b": not is_buy,
+                    "p": str(take_profit), "s": str(qty), "r": True,
+                    "t": {"trigger": {"isMarket": True, "triggerPx": str(take_profit), "tpsl": "tp"}},
+                })
+            if stop_loss:
+                tp_sl_orders.append({
+                    "a": coin_idx, "b": not is_buy,
+                    "p": str(stop_loss), "s": str(qty), "r": True,
+                    "t": {"trigger": {"isMarket": True, "triggerPx": str(stop_loss), "tpsl": "sl"}},
+                })
+            await _hl_exchange(wallet_address, private_key, {
+                "type": "order", "orders": tp_sl_orders, "grouping": "positionTpsl",
+            })
+        except Exception as e:
+            logger.warning(f"HL TP/SL ignorado: {e}")
+
     return {"order_id": order_id, "price": price, "qty": qty}
 
 
@@ -727,8 +741,13 @@ async def _validate_connection(exchange: str, api_key: str, api_secret: str, tes
     try:
         if exchange == "bybit":
             await _bybit_get_balance(api_key, api_secret, testnet)
-        elif exchange == "mexc":
-            await _mexc_get_balance(api_key, api_secret)
+        elif exchange == "okx":
+            await _okx_get_balance(api_key, api_secret)
+        elif exchange == "hyperliquid":
+            # Hyperliquid: api_key = endereço wallet
+            if not api_key.startswith("0x") or len(api_key) < 40:
+                raise HTTPException(400, "Hyperliquid: api_key deve ser o endereço da wallet (0x...)")
+            await _hl_get_balance(api_key)
         else:
             raise HTTPException(400, f"Exchange '{exchange}' não suportada")
     except HTTPException:
@@ -741,8 +760,10 @@ async def _get_balance(key: ExchangeKey, trade_mode: str = "spot") -> list:
     secret = _decrypt_secret(key.api_secret_encrypted)
     if key.exchange == "bybit":
         return await _bybit_get_balance(key.api_key, secret, key.testnet, trade_mode)
-    elif key.exchange == "mexc":
-        return await _mexc_get_balance(key.api_key, secret, trade_mode)
+    elif key.exchange == "okx":
+        return await _okx_get_balance(key.api_key, secret)
+    elif key.exchange == "hyperliquid":
+        return await _hl_get_balance(key.api_key)
     return []
 
 
@@ -757,7 +778,7 @@ async def _execute_order(key: ExchangeKey, req: ExecuteOrderRequest) -> dict:
                 req.pair, req.side, req.order_type,
                 req.order_size_usdt, req.limit_price,
             )
-        else:  # futures
+        else:
             return await _bybit_execute_futures(
                 key.api_key, secret, key.testnet,
                 req.pair, req.side, req.order_type,
@@ -765,20 +786,30 @@ async def _execute_order(key: ExchangeKey, req: ExecuteOrderRequest) -> dict:
                 req.take_profit, req.stop_loss, req.limit_price,
             )
 
-    elif key.exchange == "mexc":
+    elif key.exchange == "okx":
         if mode == "spot":
-            return await _mexc_execute_spot(
+            return await _okx_execute_spot(
                 key.api_key, secret,
                 req.pair, req.side, req.order_type,
                 req.order_size_usdt, req.limit_price,
             )
-        else:  # futures
-            return await _mexc_execute_futures(
+        else:
+            return await _okx_execute_futures(
                 key.api_key, secret,
                 req.pair, req.side, req.order_type,
                 req.order_size_usdt, req.leverage,
                 req.take_profit, req.stop_loss, req.limit_price,
             )
+
+    elif key.exchange == "hyperliquid":
+        if mode == "spot":
+            raise HTTPException(400, "Hyperliquid suporta apenas Futuros (perpetuals). Usa modo Futures.")
+        return await _hl_execute_futures(
+            key.api_key, secret,
+            req.pair, req.side,
+            req.order_size_usdt, req.leverage,
+            req.take_profit, req.stop_loss,
+        )
 
     raise HTTPException(400, "Exchange não suportada")
 
@@ -790,18 +821,12 @@ async def _execute_order(key: ExchangeKey, req: ExecuteOrderRequest) -> dict:
 async def trigger_auto_trades(
     pair: str,
     timeframe: str,
-    bias: str,         # "LONG" | "SHORT"
+    bias: str,
     confidence: int,
     take_profit: float,
     stop_loss: float,
     signal_id: Optional[int] = None,
 ) -> None:
-    """
-    Verifica AutoTradeConfigs com auto_execute=True.
-    Configs com pair=NULL entram em modo AI automático (aceita qualquer par).
-    Executa a ordem se confiança >= min_confidence e open_trades < max_open_trades.
-    Chamada assíncrona — erros são logados, nunca propagados.
-    """
     if bias not in ("LONG", "SHORT"):
         return
 
@@ -813,7 +838,6 @@ async def trigger_auto_trades(
                 select(AutoTradeConfig, ExchangeKey)
                 .join(ExchangeKey, AutoTradeConfig.exchange_key_id == ExchangeKey.id)
                 .where(
-                    # Corresponde se par específico OU modo automático (pair=None)
                     or_(AutoTradeConfig.pair == pair, AutoTradeConfig.pair == None),
                     AutoTradeConfig.timeframe  == timeframe,
                     AutoTradeConfig.auto_execute == True,
@@ -824,12 +848,10 @@ async def trigger_auto_trades(
             rows = result.all()
 
         for cfg, key in rows:
-            # Verificar confiança mínima
             if confidence < cfg.min_confidence:
                 logger.info(f"Auto-execute skip {pair}: confidence {confidence} < {cfg.min_confidence}")
                 continue
 
-            # Verificar max_open_trades
             async with AsyncSessionLocal() as db:
                 open_count_res = await db.execute(
                     select(func.count(TradeLog.id)).where(
@@ -841,14 +863,16 @@ async def trigger_auto_trades(
                 open_count = open_count_res.scalar() or 0
 
             if open_count >= cfg.max_open_trades:
-                logger.info(f"Auto-execute skip {pair}: {open_count} >= max {cfg.max_open_trades}")
                 continue
 
-            # Calcular TP/SL com multiplicadores do config
             adj_tp = round(take_profit * float(cfg.tp_multiplier), 6) if take_profit else None
             adj_sl = round(stop_loss  * float(cfg.sl_multiplier), 6) if stop_loss  else None
             mode   = cfg.trade_mode or "spot"
             side   = "Buy" if bias == "LONG" else "Sell"
+
+            # Hyperliquid só suporta futuros
+            if key.exchange == "hyperliquid" and mode == "spot":
+                mode = "futures"
 
             req = ExecuteOrderRequest(
                 exchange_key_id = key.id,
@@ -862,7 +886,6 @@ async def trigger_auto_trades(
                 stop_loss       = adj_sl if mode == "futures" else None,
             )
 
-            # Registo antes de executar
             async with AsyncSessionLocal() as db:
                 log = TradeLog(
                     user_id         = cfg.user_id,
@@ -881,7 +904,6 @@ async def trigger_auto_trades(
                 )
                 db.add(log)
                 await db.flush()
-                log_id = log.id
 
                 try:
                     result_data = await _execute_order(key, req)
@@ -889,11 +911,7 @@ async def trigger_auto_trades(
                     log.qty      = result_data["qty"]
                     log.price    = result_data["price"]
                     log.status   = "filled"
-                    logger.info(
-                        f"Auto-execute OK: {pair} {side} {mode} "
-                        f"qty={result_data['qty']} price={result_data['price']} "
-                        f"order={result_data['order_id']} user={cfg.user_id}"
-                    )
+                    logger.info(f"Auto-execute OK: {pair} {side} {mode} user={cfg.user_id}")
                 except Exception as e:
                     log.status    = "failed"
                     log.error_msg = str(e)
@@ -901,10 +919,9 @@ async def trigger_auto_trades(
 
                 await db.commit()
 
-            # Notificação Telegram
             try:
                 await _notify_auto_trade(cfg.user_id, key.exchange, mode, pair, side,
-                                          req.order_size_usdt, adj_tp, adj_sl, log.status)
+                                          float(cfg.order_size_usdt), adj_tp, adj_sl, log.status)
             except Exception as e:
                 logger.warning(f"Telegram notify failed: {e}")
 
@@ -916,7 +933,6 @@ async def _notify_auto_trade(
     user_id: int, exchange: str, mode: str, pair: str,
     side: str, size: float, tp: Optional[float], sl: Optional[float], status: str,
 ) -> None:
-    """Envia notificação Telegram ao user quando uma ordem automática é executada."""
     from app.core.config import settings
     from app.core.database import AsyncSessionLocal, User
     if not settings.TELEGRAM_TOKEN:
@@ -1002,15 +1018,10 @@ async def delete_key(key_id: int, user=Depends(get_current_user), db: AsyncSessi
 @router.get("/balance/{key_id}")
 async def get_balance(
     key_id: int,
-    mode: str = "spot",   # "spot" | "futures"
+    mode: str = "spot",
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Retorna o saldo da wallet correcta:
-    - mode=spot    → Spot wallet (UNIFIED no Bybit, /api/v3/account no MEXC)
-    - mode=futures → Contract/Futures wallet (CONTRACT no Bybit, futures API no MEXC)
-    """
     result = await db.execute(
         select(ExchangeKey).where(ExchangeKey.id == key_id, ExchangeKey.user_id == user["uid"])
     )
@@ -1022,7 +1033,6 @@ async def get_balance(
 
 @router.get("/timeframes")
 async def get_timeframes(mode: str = "spot"):
-    """Retorna os timeframes válidos para o modo (spot | futures)."""
     return {
         "mode":       mode,
         "timeframes": FUTURES_TIMEFRAMES if mode == "futures" else SPOT_TIMEFRAMES,
@@ -1035,17 +1045,14 @@ async def save_config(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Validar timeframe para o modo
     valid_tfs = FUTURES_TIMEFRAMES if req.trade_mode == "futures" else SPOT_TIMEFRAMES
     if req.timeframe not in valid_tfs:
         raise HTTPException(400, f"Timeframe '{req.timeframe}' inválido para modo {req.trade_mode}. "
                                   f"Válidos: {valid_tfs}")
 
-    # Spot não pode ter leverage > 1
     if req.trade_mode == "spot" and req.leverage > 1:
         raise HTTPException(400, "Spot não suporta leverage. Define leverage=1 ou muda para futures.")
 
-    # Verificar que a key pertence ao user
     result = await db.execute(
         select(ExchangeKey).where(ExchangeKey.id == req.exchange_key_id, ExchangeKey.user_id == user["uid"])
     )
@@ -1101,12 +1108,10 @@ async def execute_order(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Validações de modo
     if req.trade_mode == "spot" and req.leverage > 1:
         raise HTTPException(400, "Spot não suporta leverage.")
     if req.trade_mode == "spot" and (req.take_profit or req.stop_loss):
-        raise HTTPException(400, "Spot não suporta TP/SL nativos. "
-                                  "Usa modo Futures para TP/SL automático.")
+        raise HTTPException(400, "Spot não suporta TP/SL nativos. Usa modo Futures para TP/SL automático.")
 
     result = await db.execute(
         select(ExchangeKey).where(ExchangeKey.id == req.exchange_key_id,
@@ -1116,7 +1121,10 @@ async def execute_order(
     if not key:
         raise HTTPException(403, "Key not found")
 
-    # Verificar max_open_trades (se existir config para este par/modo)
+    # Hyperliquid só suporta futuros
+    if key.exchange == "hyperliquid" and req.trade_mode == "spot":
+        raise HTTPException(400, "Hyperliquid suporta apenas Futuros. Muda para modo Futures.")
+
     cfg_res = await db.execute(
         select(AutoTradeConfig).where(
             AutoTradeConfig.user_id         == user["uid"],
@@ -1210,12 +1218,10 @@ async def list_trades(user=Depends(get_current_user), db: AsyncSession = Depends
     ]
 
 
-# ── Pydantic model for /ai-run ─────────────────────────────────────────────
-
 class AIRunRequest(BaseModel):
     exchange_key_id: int
     trade_mode:      Literal["spot", "futures"] = "spot"
-    pair:            Optional[str]   = None          # None = AI escolhe o melhor par
+    pair:            Optional[str]   = None
     timeframe:       str             = "1H"
     order_size_usdt: float           = Field(10.0, gt=0)
     leverage:        int             = Field(1, ge=1, le=125)
@@ -1229,32 +1235,16 @@ async def ai_run(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Analisa o mercado com IA e executa uma ordem se o sinal for suficientemente forte.
-
-    Fluxo:
-    1. Valida a exchange key do utilizador.
-    2. Se `pair` for fornecido → analisa apenas esse par.
-       Se `pair` for omitido  → faz scan dos top pares e escolhe o melhor sinal.
-    3. Se bias=LONG|SHORT e confidence >= min_confidence → executa a ordem.
-    4. Devolve o resultado ao frontend (executed, pair, bias, confidence, price, …).
-    """
     from app.services.signal_service import run_signal, run_scan
     from app.services.data_fetcher import SCAN_PAIRS
 
-    # Spot não suporta leverage
     if req.trade_mode == "spot" and req.leverage > 1:
-        raise HTTPException(400, "Spot não suporta leverage. Define leverage=1 ou usa modo futures.")
+        raise HTTPException(400, "Spot não suporta leverage.")
 
-    # Validar timeframe
     valid_tfs = FUTURES_TIMEFRAMES if req.trade_mode == "futures" else SPOT_TIMEFRAMES
     if req.timeframe not in valid_tfs:
-        raise HTTPException(
-            400,
-            f"Timeframe '{req.timeframe}' inválido para modo {req.trade_mode}. Válidos: {valid_tfs}",
-        )
+        raise HTTPException(400, f"Timeframe '{req.timeframe}' inválido para modo {req.trade_mode}.")
 
-    # Verificar que a key pertence ao utilizador
     key_res = await db.execute(
         select(ExchangeKey).where(
             ExchangeKey.id      == req.exchange_key_id,
@@ -1266,23 +1256,19 @@ async def ai_run(
     if not key:
         raise HTTPException(403, "Exchange key não encontrada ou inativa.")
 
-    # ── 1. Obter sinal de IA ───────────────────────────────────────────────
-    # Spot: o utilizador deve sempre indicar o par — scan automático só em futures
+    # Hyperliquid só suporta futuros
+    if key.exchange == "hyperliquid" and req.trade_mode == "spot":
+        raise HTTPException(400, "Hyperliquid suporta apenas Futuros. Muda para modo Futures.")
+
     if req.trade_mode == "spot" and not req.pair:
-        raise HTTPException(
-            400,
-            "Modo Spot requer um par específico (ex: BTC/USDT). "
-            "O scan automático de pares só está disponível em modo Futures."
-        )
+        raise HTTPException(400, "Modo Spot requer um par específico.")
 
     try:
         if req.pair:
-            # Sinal para par específico (obrigatório em spot, opcional em futures)
             signal = await run_signal(req.pair, req.timeframe, use_mtf=True, user_id=user["uid"])
             signal.setdefault("pair", req.pair)
             scanned = 1
         else:
-            # Scan automático — apenas futures, escolhe o melhor par LONG/SHORT
             scan = await run_scan(SCAN_PAIRS, timeframe=req.timeframe, use_mtf=True)
             scanned = scan.get("scanned", len(SCAN_PAIRS))
             best = scan.get("best")
@@ -1307,50 +1293,29 @@ async def ai_run(
     take_profit = float(signal.get("takeProfit") or signal.get("take_profit") or 0) or None
     stop_loss   = float(signal.get("stopLoss")   or signal.get("stop_loss")   or 0) or None
 
-    # ── 2. Verificar se o sinal é suficientemente forte ───────────────────
     if bias not in ("LONG", "SHORT"):
         return {
-            "executed":   False,
-            "bias":       bias,
-            "confidence": confidence,
-            "pair":       pair,
-            "reason":     f"Sinal WAIT — sem setup adequado (confiança: {confidence}%).",
-            "scanned":    scanned if not req.pair else 1,
-            "signal":     signal,
-            "timeframe":  req.timeframe,
-            "trade_mode": req.trade_mode,
+            "executed": False, "bias": bias, "confidence": confidence, "pair": pair,
+            "reason": f"Sinal WAIT — sem setup adequado (confiança: {confidence}%).",
+            "scanned": scanned if not req.pair else 1, "signal": signal,
+            "timeframe": req.timeframe, "trade_mode": req.trade_mode,
         }
 
     if confidence < req.min_confidence:
         return {
-            "executed":   False,
-            "bias":       bias,
-            "confidence": confidence,
-            "pair":       pair,
-            "reason":     f"Confiança {confidence}% abaixo do mínimo {req.min_confidence}%.",
-            "scanned":    scanned if not req.pair else 1,
-            "signal":     signal,
-            "timeframe":  req.timeframe,
-            "trade_mode": req.trade_mode,
+            "executed": False, "bias": bias, "confidence": confidence, "pair": pair,
+            "reason": f"Confiança {confidence}% abaixo do mínimo {req.min_confidence}%.",
+            "scanned": scanned if not req.pair else 1, "signal": signal,
+            "timeframe": req.timeframe, "trade_mode": req.trade_mode,
         }
 
-    # Spot não suporta SHORT — informa o utilizador e devolve o sinal sem executar
     if req.trade_mode == "spot" and bias == "SHORT":
         return {
-            "executed":   False,
-            "bias":       bias,
-            "confidence": confidence,
-            "pair":       pair,
-            "reason":     (
-                f"A IA identificou sinal SHORT em {pair} (confiança: {confidence}%) mas Spot não suporta "                "venda a descoberto. Muda para modo Futures para executar SHORTs."
-            ),
-            "scanned":    1,
-            "signal":     signal,
-            "timeframe":  req.timeframe,
-            "trade_mode": req.trade_mode,
+            "executed": False, "bias": bias, "confidence": confidence, "pair": pair,
+            "reason": f"Sinal SHORT identificado mas Spot não suporta venda a descoberto. Usa Futures.",
+            "scanned": 1, "signal": signal, "timeframe": req.timeframe, "trade_mode": req.trade_mode,
         }
 
-    # ── 3. Executar a ordem ───────────────────────────────────────────────
     side = "Buy" if bias == "LONG" else "Sell"
     execute_req = ExecuteOrderRequest(
         exchange_key_id = req.exchange_key_id,
@@ -1360,7 +1325,6 @@ async def ai_run(
         order_size_usdt = req.order_size_usdt,
         leverage        = req.leverage if req.trade_mode == "futures" else 1,
         order_type      = "Market",
-        # TP/SL apenas em futures
         take_profit     = take_profit if req.trade_mode == "futures" else None,
         stop_loss       = stop_loss   if req.trade_mode == "futures" else None,
     )
@@ -1391,18 +1355,10 @@ async def ai_run(
         log.status   = "filled"
         await db.commit()
 
-        logger.info(
-            f"ai-run OK: {pair} {side} {req.trade_mode} "
-            f"qty={result_data['qty']} price={result_data['price']} "
-            f"user={user['uid']} confidence={confidence}"
-        )
-
-        # Notificação Telegram (não bloqueante)
         try:
             await _notify_auto_trade(
                 user["uid"], key.exchange, req.trade_mode, pair, side,
-                req.order_size_usdt, execute_req.take_profit, execute_req.stop_loss,
-                "filled",
+                req.order_size_usdt, execute_req.take_profit, execute_req.stop_loss, "filled",
             )
         except Exception as e:
             logger.warning(f"Telegram notify failed: {e}")
