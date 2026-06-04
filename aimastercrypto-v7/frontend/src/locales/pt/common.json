@@ -1,7 +1,7 @@
 {
   "nav": {
     "dashboard": "Painel",
-    "scanner": "Scanner IA",
+    "scanner": "AI Scanner",
     "signals": "Sinais",
     "memecoins": "Memecoins",
     "backtest": "Backtest",
@@ -13,7 +13,9 @@
   "dashboard": {
     "title": "Visão do Mercado",
     "market_cap": "Cap. de Mercado Total",
+    "market_cap_sub": "capitalização total",
     "volume_24h": "Volume 24h",
+    "volume_sub": "últimas 24 horas",
     "btc_dominance": "Dominância BTC",
     "fear_greed": "Medo & Ganância",
     "trending": "Em Alta",
@@ -23,15 +25,12 @@
     "live_signals": "Sinais ao Vivo",
     "market_sentiment": "Sentimento do Mercado",
     "active_cryptos": "Criptos Ativas",
-    "active_cryptos_sub": "em circulação",
-    "market_cap_sub": "capitalização total",
-    "volume_": "Volume",
-    "volume_sub": "últimas 24 horas"
+    "active_cryptos_sub": "em circulação"
   },
   "scanner": {
-    "title": "Scanner IA",
+    "title": "AI Scanner",
     "scan_all": "Escanear Todos",
-    "scanning": "Escaneando...",
+    "scanning": "A escanear...",
     "timeframe": "Período",
     "pair": "Par",
     "analyze": "Analisar",
@@ -43,7 +42,7 @@
     "analyzing": "A analisar...",
     "click_scan": "Clica em Escanear para começar",
     "pairs_available": "pares disponíveis",
-    "pairs_monitoring": "pares monitorados",
+    "pairs_monitoring": "pares monitorizados",
     "scanning_pairs": "A escanear pares...",
     "select_pair_hint": "Seleciona um par para analisar",
     "wait_pairs": "A carregar pares..."
@@ -64,14 +63,14 @@
     "textbook": "EXCELENTE",
     "strong": "FORTE",
     "good": "BOM",
-    "developing": "DESENVOLVENDO",
+    "developing": "A DESENVOLVER",
     "mtf_confluence": "Confluência MTF",
     "indicators": "Indicadores"
   },
   "backtest": {
     "title": "Backtest de Estratégia",
     "run": "Executar Backtest",
-    "running": "Executando...",
+    "running": "A executar...",
     "trades": "Total de Operações",
     "win_rate": "Taxa de Acerto",
     "total_pnl": "PnL Total",
@@ -87,31 +86,7 @@
     "closed_signals": "Sinais Fechados",
     "win_rate": "Taxa de Acerto",
     "avg_pnl": "PnL Médio",
-    "wins_losses": "Ganhos / Perdas"
-  },
-  "common": {
-    "loading": "Carregando...",
-    "error": "Erro ao carregar dados",
-    "retry": "Tentar novamente",
-    "search": "Buscar",
-    "filter": "Filtrar",
-    "sort": "Ordenar",
-    "export": "Exportar",
-    "settings": "Configurações",
-    "premium": "Premium",
-    "free": "Gratuito",
-    "upgrade": "Assine o Premium",
-    "language": "Idioma",
-    "theme": "Tema",
-    "asset": "Ativo",
-    "change_": "Variação",
-    "login": "Entrar",
-    "logout": "Sair",
-    "market_cap_col": "Cap. Mercado",
-    "price": "Preço",
-    "rank": "Rank",
-    "register": "Registar",
-    "search_pair": "Pesquisar par..."
+    "wins_losses": "G / P"
   },
   "news": {
     "empty_hint": "Tenta novamente mais tarde",
@@ -120,9 +95,6 @@
     "filter_negative": "Negativas",
     "filter_positive": "Positivas",
     "loading": "A carregar notícias..."
-  },
-  "style": {
-    "display": "Visualização"
   },
   "watchlist": {
     "add_first": "Adiciona o teu primeiro par",
@@ -135,5 +107,34 @@
     "pairs": "Pares",
     "pairs_saved": "pares guardados",
     "remove_tooltip": "Remover da lista"
+  },
+  "style": {
+    "display": "Visualização"
+  },
+  "common": {
+    "loading": "A carregar...",
+    "error": "Erro ao carregar dados",
+    "retry": "Tentar novamente",
+    "search": "Pesquisar",
+    "filter": "Filtrar",
+    "sort": "Ordenar",
+    "export": "Exportar",
+    "settings": "Definições",
+    "premium": "Premium",
+    "free": "Gratuito",
+    "upgrade": "Assine o Premium",
+    "language": "Idioma",
+    "theme": "Tema",
+    "asset": "Ativo",
+    "change_": "Variação",
+    "change_24h": "Var. 24h",
+    "change_7d": "Var. 7d",
+    "login": "Entrar",
+    "logout": "Sair",
+    "market_cap_col": "Cap. Mercado",
+    "price": "Preço",
+    "rank": "#",
+    "register": "Registar",
+    "search_pair": "Pesquisar par..."
   }
 }
