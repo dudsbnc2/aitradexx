@@ -82,6 +82,13 @@ async def create_tables():
             "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS triggered_by VARCHAR(20) DEFAULT 'manual';",
             "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS signal_id INTEGER;",
             "ALTER TABLE trade_logs ADD COLUMN IF NOT EXISTS leverage INTEGER DEFAULT 1;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_groq_key TEXT;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_openrouter_key TEXT;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_gemini_key TEXT;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_anthropic_key TEXT;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_preferred VARCHAR(20);",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_trial_used INTEGER DEFAULT 0;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_trial_limit INTEGER DEFAULT 50;",
         ]
         for sql in migrations:
             try:
@@ -116,6 +123,17 @@ class User(Base):
     telegram_chat_id = Column(String(50))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # ── BYOK: chaves de IA do utilizador (encriptadas com Fernet) ──────────
+    ai_groq_key       = Column(Text, nullable=True)          # chave Groq
+    ai_openrouter_key = Column(Text, nullable=True)          # chave OpenRouter
+    ai_gemini_key     = Column(Text, nullable=True)          # chave Gemini
+    ai_anthropic_key  = Column(Text, nullable=True)          # chave Anthropic
+    ai_preferred      = Column(String(20), nullable=True)    # groq|openrouter|gemini|anthropic
+
+    # ── Trial: contagem de chamadas de IA com chaves do servidor ───────────
+    ai_trial_used     = Column(Integer, default=0)           # chamadas já gastas
+    ai_trial_limit    = Column(Integer, default=50)          # limite por tier (admin pode alterar)
 
 
 class EmailVerification(Base):
