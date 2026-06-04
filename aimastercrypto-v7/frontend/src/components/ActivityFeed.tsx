@@ -6,6 +6,7 @@
  * Recebe eventos do activity-log store via CustomEvent.
  */
 
+import { useTranslations } from 'next-intl'
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Activity, X, ChevronDown, ChevronUp, Trash2, CheckCircle, AlertTriangle, Info, Zap, Radio } from 'lucide-react'
@@ -29,6 +30,7 @@ interface Props {
 }
 
 export default function ActivityFeed({ maxVisible = 8, collapsed: initCollapsed = false }: Props) {
+  const t = useTranslations()
   const [entries, setEntries] = useState<ActivityEntry[]>(getActivity())
   const [collapsed, setCollapsed] = useState(initCollapsed)
   const listRef = useRef<HTMLDivElement>(null)
@@ -60,7 +62,7 @@ export default function ActivityFeed({ maxVisible = 8, collapsed: initCollapsed 
       >
         <div className="flex items-center gap-2">
           <Activity size={13} className="text-[#00d4ff]" />
-          <span className="text-xs font-bold font-mono text-[#8ba3be]">Actividade</span>
+          {t('autotrader.activity_title')}
           {entries.length > 0 && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold font-mono bg-[#00d4ff]/10 text-[#00d4ff] border border-[#00d4ff]/20">
               {entries.length}
