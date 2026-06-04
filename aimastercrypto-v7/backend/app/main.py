@@ -22,6 +22,7 @@ from app.routers.admin_ops import router as admin_ops_router
 from app.routers.auth_secure import router as auth_secure_router
 from app.routers.billing import router as billing_router
 from app.routers.autotrader import router as autotrader_router
+from app.routers.user_ai_keys import router as user_ai_keys_router
 from app.websockets.manager import ws_manager, price_broadcaster
 from app.services.signal_service import run_scan
 from app.services.data_fetcher import ALL_PAIRS, SCAN_PAIRS
@@ -173,6 +174,7 @@ app.include_router(market.router,        prefix="/api")
 app.include_router(admin.router,         prefix="/api")
 # AutoTrader — Bybit integration
 app.include_router(autotrader_router)
+app.include_router(user_ai_keys_router)
 # WebSockets
 app.include_router(ws.router)
 
