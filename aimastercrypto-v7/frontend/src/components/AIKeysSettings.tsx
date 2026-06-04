@@ -4,7 +4,7 @@
  * Mostra estado de trial + formulário para adicionar/remover chaves por provider
  */
 import { useState, useEffect, useCallback } from "react";
-import { apiFetch } from "@/lib/api";
+import { api } from "@/lib/api";
 
 const PROVIDERS = [
   {
@@ -68,7 +68,7 @@ export default function AIKeysSettings() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch("/api/user/ai-keys");
+      const res = await api.get("/api/user/ai-keys").then(r => r.data);
       setData(res);
     } catch {
       /* silencioso */
@@ -89,10 +89,7 @@ export default function AIKeysSettings() {
     if (!key) return;
     setSaving(providerId);
     try {
-      await apiFetch("/api/user/ai-keys", {
-        method: "POST",
-        body: JSON.stringify({ provider: providerId, api_key: key, set_as_preferred: !data?.has_own_key }),
-      });
+      await api.post("/api/user/ai-keys", { provider: providerId, api_key: key, set_as_preferred: !data?.has_own_key });
       setInputs((p) => ({ ...p, [providerId]: "" }));
       setShowInput((p) => ({ ...p, [providerId]: false }));
       toast(providerId, "Chave guardada com sucesso", true);
@@ -108,7 +105,7 @@ export default function AIKeysSettings() {
     if (!confirm(`Remover chave de ${providerId}?`)) return;
     setDeleting(providerId);
     try {
-      await apiFetch(`/api/user/ai-keys/${providerId}`, { method: "DELETE" });
+      await api.delete(`/api/user/ai-keys/${providerId}`);
       toast(providerId, "Chave removida", true);
       await load();
     } catch {
@@ -120,10 +117,7 @@ export default function AIKeysSettings() {
 
   const handleSetPreferred = async (providerId: string) => {
     try {
-      await apiFetch("/api/user/ai-keys/preferred", {
-        method: "PATCH",
-        body: JSON.stringify({ provider: providerId }),
-      });
+      await api.patch("/api/user/ai-keys/preferred", { provider: providerId });
       await load();
     } catch { /* silencioso */ }
   };
