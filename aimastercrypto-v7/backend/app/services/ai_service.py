@@ -1,6 +1,8 @@
 """
-AI Provider Service
-Multi-provider: Groq → OpenRouter → Gemini → Anthropic → Rule Engine
+AI Provider Service — BYOK (Bring Your Own Key)
+Usa as chaves do utilizador se disponíveis; cai para as chaves do servidor como trial.
+
+Fallback chain: Groq → OpenRouter (gratuito) → Gemini → Anthropic → Rule Engine
 
 OpenRouter suporta modelos gratuitos (sem custo):
   - meta-llama/llama-3.3-70b-instruct:free
@@ -20,10 +22,13 @@ logger = logging.getLogger("tradeia.ai")
 
 # Modelos gratuitos OpenRouter ordenados por qualidade de raciocínio financeiro
 OPENROUTER_FREE_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",   # Melhor qualidade geral
-    "deepseek/deepseek-r1:free",                 # Forte em raciocínio quantitativo
-    "mistralai/mistral-7b-instruct:free",        # Fallback rápido
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek/deepseek-r1:free",
+    "mistralai/mistral-7b-instruct:free",
 ]
+
+# Limite de trial quando o user não tem chave própria (safety cap extra além do DB)
+_TRIAL_HARD_LIMIT = 50
 
 
 def build_prompt(pair: str, tf: str, ind: dict, mtf: Optional[dict] = None) -> str:
@@ -35,8 +40,6 @@ def build_prompt(pair: str, tf: str, ind: dict, mtf: Optional[dict] = None) -> s
             f"(score: {mtf.get('total_score', 0)})"
         )
 
-    # Pre-calculate reference levels so the AI has concrete anchors to refine,
-    # not zeros that it tends to echo back unchanged.
     price   = ind["price"]
     atr_v   = ind["atr"]
     sl_long  = round(price - atr_v * 1.5, 6)
@@ -48,7 +51,6 @@ def build_prompt(pair: str, tf: str, ind: dict, mtf: Optional[dict] = None) -> s
     ez_high_long  = round(price + atr_v * 0.3, 6)
     ez_low_short  = round(price - atr_v * 0.3, 6)
 
-    # Scenario targets (rough ATR multiples for the AI to adjust)
     bull_tp  = round(price + atr_v * 4.0, 6)
     base_tp  = round(price + atr_v * 2.5, 6)
     bear_tp  = round(price - atr_v * 1.5, 6)
@@ -108,11 +110,13 @@ def enrich_signal(s: dict, ind: dict) -> dict:
     return s
 
 
-async def call_groq(prompt: str) -> dict:
+# ── Chamadas individuais aos providers ────────────────────────────────────
+
+async def call_groq(prompt: str, api_key: str) -> dict:
     c = get_http_client()
     r = await c.post(
         "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         json={
             "model": "llama-3.3-70b-versatile",
             "max_tokens": 1000,
@@ -127,11 +131,7 @@ async def call_groq(prompt: str) -> dict:
     return parse_json(r.json()["choices"][0]["message"]["content"])
 
 
-async def call_openrouter(prompt: str, model: str = None) -> dict:
-    """
-    Chama OpenRouter — suporta dezenas de modelos incluindo opções GRATUITAS.
-    Tenta cada modelo gratuito em sequência até um funcionar.
-    """
+async def call_openrouter(prompt: str, api_key: str, model: str = None) -> dict:
     c = get_http_client()
     models_to_try = [model] if model else OPENROUTER_FREE_MODELS
 
@@ -141,9 +141,9 @@ async def call_openrouter(prompt: str, model: str = None) -> dict:
             r = await c.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://aimastercrypto.com",   # Recomendado pelo OpenRouter
+                    "HTTP-Referer": "https://aimastercrypto.com",
                     "X-Title": "AIMasterCrypto",
                 },
                 json={
@@ -160,7 +160,7 @@ async def call_openrouter(prompt: str, model: str = None) -> dict:
             data = r.json()
             content = data["choices"][0]["message"]["content"]
             result = parse_json(content)
-            result["_openrouter_model"] = m   # Guarda qual modelo foi usado
+            result["_openrouter_model"] = m
             logger.info(f"OpenRouter OK com modelo: {m}")
             return result
         except Exception as e:
@@ -171,8 +171,8 @@ async def call_openrouter(prompt: str, model: str = None) -> dict:
     raise Exception(f"Todos os modelos OpenRouter falharam. Último erro: {last_error}")
 
 
-async def call_gemini(prompt: str) -> dict:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
+async def call_gemini(prompt: str, api_key: str) -> dict:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     c = get_http_client()
     r = await c.post(
         url,
@@ -183,11 +183,11 @@ async def call_gemini(prompt: str) -> dict:
     return parse_json(r.json()["candidates"][0]["content"]["parts"][0]["text"])
 
 
-async def call_anthropic(prompt: str) -> dict:
+async def call_anthropic(prompt: str, api_key: str) -> dict:
     c = get_http_client()
     r = await c.post(
         "https://api.anthropic.com/v1/messages",
-        headers={"x-api-key": settings.ANTHROPIC_API_KEY,
+        headers={"x-api-key": api_key,
                  "anthropic-version": "2023-06-01",
                  "Content-Type": "application/json"},
         json={"model": "claude-sonnet-4-20250514", "max_tokens": 1000,
@@ -197,65 +197,197 @@ async def call_anthropic(prompt: str) -> dict:
     return parse_json(r.json()["content"][0]["text"])
 
 
-async def get_ai_signal(pair: str, tf: str, ind: dict, mtf: Optional[dict] = None) -> tuple[dict, str]:
+# ── Utilitário: desencripta chave Fernet ──────────────────────────────────
+
+def _decrypt_key(encrypted: Optional[str]) -> Optional[str]:
+    """Desencripta chave guardada na DB. Retorna None se falhar ou vazia."""
+    if not encrypted:
+        return None
+    try:
+        from cryptography.fernet import Fernet
+        if not settings.ENCRYPTION_KEY:
+            return None
+        f = Fernet(settings.ENCRYPTION_KEY.encode())
+        return f.decrypt(encrypted.encode()).decode()
+    except Exception as e:
+        logger.warning(f"_decrypt_key failed: {e}")
+        return None
+
+
+# ── Carrega chaves do user a partir do DB ─────────────────────────────────
+
+async def _get_user_keys(user_id: Optional[int]) -> dict:
+    """
+    Retorna dict com as chaves desencriptadas do user e info de trial.
+    Retorna chaves vazias se user_id for None ou DB indisponível.
+    """
+    empty = {
+        "groq": None, "openrouter": None, "gemini": None, "anthropic": None,
+        "preferred": None, "trial_used": 0, "trial_limit": _TRIAL_HARD_LIMIT,
+        "has_own_key": False,
+    }
+    if not user_id:
+        return empty
+    try:
+        from app.core.database import AsyncSessionLocal, User
+        if AsyncSessionLocal is None:
+            return empty
+        async with AsyncSessionLocal() as session:
+            user = await session.get(User, user_id)
+            if not user:
+                return empty
+            groq_key       = _decrypt_key(user.ai_groq_key)
+            openrouter_key = _decrypt_key(user.ai_openrouter_key)
+            gemini_key     = _decrypt_key(user.ai_gemini_key)
+            anthropic_key  = _decrypt_key(user.ai_anthropic_key)
+            has_own = any([groq_key, openrouter_key, gemini_key, anthropic_key])
+            return {
+                "groq": groq_key,
+                "openrouter": openrouter_key,
+                "gemini": gemini_key,
+                "anthropic": anthropic_key,
+                "preferred": user.ai_preferred,
+                "trial_used": user.ai_trial_used or 0,
+                "trial_limit": user.ai_trial_limit or _TRIAL_HARD_LIMIT,
+                "has_own_key": has_own,
+            }
+    except Exception as e:
+        logger.warning(f"_get_user_keys failed: {e}")
+        return empty
+
+
+async def _increment_trial(user_id: int) -> None:
+    """Incrementa contador de trial do user."""
+    try:
+        from app.core.database import AsyncSessionLocal, User
+        if AsyncSessionLocal is None:
+            return
+        async with AsyncSessionLocal() as session:
+            user = await session.get(User, user_id)
+            if user:
+                user.ai_trial_used = (user.ai_trial_used or 0) + 1
+                await session.commit()
+    except Exception as e:
+        logger.warning(f"_increment_trial failed: {e}")
+
+
+# ── Orquestrador principal ────────────────────────────────────────────────
+
+async def get_ai_signal(
+    pair: str,
+    tf: str,
+    ind: dict,
+    mtf: Optional[dict] = None,
+    user_id: Optional[int] = None,
+) -> tuple[dict, str]:
     """
     Returns (signal_dict, source_name).
-    Fallback chain: Groq → OpenRouter (gratuito) → Gemini → Anthropic → Rule Engine
+
+    Prioridade de chaves:
+      1. Chave preferida do user (se definida e disponível)
+      2. Restantes chaves do user (fallback entre elas)
+      3. Chaves do servidor como trial (se dentro do limite)
+      4. Rule engine (sem IA)
+
+    O campo signal["_byok"] indica se foi usada chave própria do user.
+    O campo signal["_trial_remaining"] indica chamadas de trial restantes.
     """
     prompt = build_prompt(pair, tf, ind, mtf)
     errors = []
 
-    if settings.GROQ_API_KEY:
-        try:
-            s = await call_groq(prompt)
-            return enrich_signal(s, ind), "groq-llama3.3-70b"
-        except Exception as e:
-            errors.append(f"Groq: {e}")
-            logger.warning(f"Groq failed: {e}")
+    user_keys = await _get_user_keys(user_id)
+    has_own   = user_keys["has_own_key"]
+    preferred = user_keys.get("preferred")
 
-    if settings.OPENROUTER_API_KEY:
-        try:
-            s = await call_openrouter(prompt)
-            model_used = s.pop("_openrouter_model", "openrouter-free")
-            short_name = model_used.split("/")[-1].replace(":free", "")
-            return enrich_signal(s, ind), f"openrouter-{short_name}"
-        except Exception as e:
-            errors.append(f"OpenRouter: {e}")
-            logger.warning(f"OpenRouter failed: {e}")
+    # ── Monta lista de providers a tentar, com as chaves correctas ────────
+    # Cada entrada: (nome, chave, callable)
+    candidates = []
 
-    if settings.GEMINI_API_KEY:
-        try:
-            s = await call_gemini(prompt)
-            return enrich_signal(s, ind), "gemini-2.0-flash"
-        except Exception as e:
-            errors.append(f"Gemini: {e}")
-            logger.warning(f"Gemini failed: {e}")
+    def _add(name: str, user_k: Optional[str], server_k: str, fn):
+        """Adiciona provider: usa chave do user se existir, senão chave do servidor (se trial ok)."""
+        if user_k:
+            candidates.append((name, user_k, fn, "own"))
+        elif server_k and not has_own:
+            # Só usa chave do servidor se o user não tem NENHUMA chave própria
+            candidates.append((name, server_k, fn, "trial"))
 
-    if settings.ANTHROPIC_API_KEY:
-        try:
-            s = await call_anthropic(prompt)
-            return enrich_signal(s, ind), "claude-sonnet"
-        except Exception as e:
-            errors.append(f"Anthropic: {e}")
-            logger.warning(f"Anthropic failed: {e}")
+    # Define a ordem: preferred vai para a frente
+    provider_order = ["groq", "openrouter", "gemini", "anthropic"]
+    if preferred and preferred in provider_order:
+        provider_order = [preferred] + [p for p in provider_order if p != preferred]
 
+    for prov in provider_order:
+        if prov == "groq":
+            _add("groq",       user_keys["groq"],       settings.GROQ_API_KEY,
+                 lambda prompt, k: call_groq(prompt, k))
+        elif prov == "openrouter":
+            _add("openrouter", user_keys["openrouter"],  settings.OPENROUTER_API_KEY,
+                 lambda prompt, k: call_openrouter(prompt, k))
+        elif prov == "gemini":
+            _add("gemini",     user_keys["gemini"],      settings.GEMINI_API_KEY,
+                 lambda prompt, k: call_gemini(prompt, k))
+        elif prov == "anthropic":
+            _add("anthropic",  user_keys["anthropic"],   settings.ANTHROPIC_API_KEY,
+                 lambda prompt, k: call_anthropic(prompt, k))
+
+    # ── Tenta cada provider na ordem ─────────────────────────────────────
+    using_trial = False
+    for name, key, fn, key_type in candidates:
+        if key_type == "trial":
+            # Verifica limite de trial
+            if user_keys["trial_used"] >= user_keys["trial_limit"]:
+                logger.info(f"Trial limit reached for user {user_id}: {user_keys['trial_used']}/{user_keys['trial_limit']}")
+                break  # Não tenta mais providers do servidor
+            using_trial = True
+
+        try:
+            s = await fn(prompt, key)
+            if name == "openrouter":
+                model_used = s.pop("_openrouter_model", "openrouter-free")
+                short_name = model_used.split("/")[-1].replace(":free", "")
+                source_name = f"openrouter-{short_name}"
+            elif name == "groq":
+                source_name = "groq-llama3.3-70b"
+            elif name == "gemini":
+                source_name = "gemini-2.0-flash"
+            else:
+                source_name = "claude-sonnet"
+
+            result = enrich_signal(s, ind)
+            result["_byok"] = key_type == "own"
+
+            if using_trial and user_id:
+                await _increment_trial(user_id)
+                trial_remaining = max(0, user_keys["trial_limit"] - user_keys["trial_used"] - 1)
+                result["_trial_remaining"] = trial_remaining
+                result["_trial_total"] = user_keys["trial_limit"]
+                if trial_remaining <= 10:
+                    result["_trial_warning"] = True
+
+            logger.info(f"AI signal OK: {name} key_type={key_type} user={user_id}")
+            return result, source_name
+
+        except Exception as e:
+            errors.append(f"{name}: {e}")
+            logger.warning(f"{name} failed (user={user_id}): {e}")
+            continue
+
+    # ── Fallback: Rule Engine ─────────────────────────────────────────────
     s = rule_engine(ind)
     if errors:
         s["ai_errors"] = errors
+    s["_byok"] = False
+
+    # Informa o user que esgotou o trial
+    if user_id and not has_own and user_keys["trial_used"] >= user_keys["trial_limit"]:
+        s["_trial_exhausted"] = True
+        s["_trial_total"] = user_keys["trial_limit"]
+
     return s, "rule-engine"
 
 
-async def get_market_summary(market_data: dict) -> str:
-    """Generate AI market commentary from market overview data."""
-    has_key = any([
-        settings.GROQ_API_KEY,
-        settings.OPENROUTER_API_KEY,
-        settings.GEMINI_API_KEY,
-        settings.ANTHROPIC_API_KEY,
-    ])
-    if not has_key:
-        return "AI market summary unavailable — configure an AI provider key."
-
+async def get_market_summary(market_data: dict, user_id: Optional[int] = None) -> str:
+    """Generate AI market commentary. Usa chaves do user se disponíveis."""
     prompt = f"""You are a professional crypto market analyst. In 2-3 sentences, summarise the current market conditions:
 
 Market Cap: ${market_data.get('total_market_cap_usd', 0):,.0f}
@@ -264,16 +396,18 @@ BTC Dominance: {market_data.get('btc_dominance', 0)}%
 Fear & Greed: {market_data.get('fear_greed', {}).get('value', 50)} ({market_data.get('fear_greed', {}).get('classification', 'Neutral')})
 24h Volume: ${market_data.get('total_volume_24h', 0):,.0f}
 
-Respond in 2-3 concise sentences. Be specific about conditions. No intro phrases like "The market..."."""
+Respond in 2-3 concise sentences. Be specific about conditions. No intro phrases like \"The market...\"."""
 
+    user_keys = await _get_user_keys(user_id)
     c = get_http_client()
 
-    # Tenta Groq primeiro (mais rápido)
-    if settings.GROQ_API_KEY:
+    # Tenta Groq
+    groq_key = user_keys["groq"] or (settings.GROQ_API_KEY if not user_keys["has_own_key"] else None)
+    if groq_key:
         try:
             r = await c.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                headers={"Authorization": f"Bearer {groq_key}"},
                 json={"model": "llama-3.3-70b-versatile", "max_tokens": 200, "temperature": 0.3,
                       "messages": [{"role": "user", "content": prompt}]},
             )
@@ -282,13 +416,14 @@ Respond in 2-3 concise sentences. Be specific about conditions. No intro phrases
         except Exception as e:
             logger.warning(f"Market summary Groq: {e}")
 
-    # Fallback para OpenRouter (gratuito)
-    if settings.OPENROUTER_API_KEY:
+    # Fallback OpenRouter
+    openrouter_key = user_keys["openrouter"] or (settings.OPENROUTER_API_KEY if not user_keys["has_own_key"] else None)
+    if openrouter_key:
         try:
             r = await c.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                    "Authorization": f"Bearer {openrouter_key}",
                     "HTTP-Referer": "https://aimastercrypto.com",
                     "X-Title": "AIMasterCrypto",
                 },
@@ -304,18 +439,13 @@ Respond in 2-3 concise sentences. Be specific about conditions. No intro phrases
         except Exception as e:
             logger.warning(f"Market summary OpenRouter: {e}")
 
-    return "Market data updated. Check indicators for detailed analysis."
+    return "Dados de mercado actualizados. Consulta os indicadores para análise detalhada."
 
 
 async def get_ai_health() -> dict:
-    """
-    Verifica o estado de cada provider de IA.
-    Usado pelo endpoint /admin/ai-health para diagnóstico.
-    Retorna dict com status de cada provider.
-    """
+    """Verifica estado de cada provider. Usado por /admin/ai-health."""
     results = {}
 
-    # Groq
     results["groq"] = {
         "configured": bool(settings.GROQ_API_KEY),
         "status": "not_configured",
@@ -335,7 +465,6 @@ async def get_ai_health() -> dict:
         except Exception as e:
             results["groq"]["status"] = f"error: {str(e)[:80]}"
 
-    # OpenRouter
     results["openrouter"] = {
         "configured": bool(settings.OPENROUTER_API_KEY),
         "status": "not_configured",
@@ -364,7 +493,6 @@ async def get_ai_health() -> dict:
         except Exception as e:
             results["openrouter"]["status"] = f"error: {str(e)[:80]}"
 
-    # Gemini
     results["gemini"] = {
         "configured": bool(settings.GEMINI_API_KEY),
         "status": "not_configured",
@@ -381,7 +509,6 @@ async def get_ai_health() -> dict:
         except Exception as e:
             results["gemini"]["status"] = f"error: {str(e)[:80]}"
 
-    # Anthropic
     results["anthropic"] = {
         "configured": bool(settings.ANTHROPIC_API_KEY),
         "status": "not_configured",
@@ -403,10 +530,8 @@ async def get_ai_health() -> dict:
         except Exception as e:
             results["anthropic"]["status"] = f"error: {str(e)[:80]}"
 
-    # Rule engine é sempre disponível
     results["rule_engine"] = {"configured": True, "status": "ok", "model": "rule-engine-v1"}
 
-    # Sumário
     active = [k for k, v in results.items() if v.get("status") == "ok"]
     results["_summary"] = {
         "active_providers": active,
