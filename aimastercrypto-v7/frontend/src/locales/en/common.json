@@ -13,24 +13,23 @@
   "dashboard": {
     "title": "Market Overview",
     "market_cap": "Total Market Cap",
+    "market_cap_sub": "total capitalisation",
     "volume_24h": "24h Volume",
+    "volume_sub": "last 24 hours",
     "btc_dominance": "BTC Dominance",
     "fear_greed": "Fear & Greed",
-    "trending": "Trending Coins",
+    "trending": "Trending",
     "top_gainers": "Top Gainers",
     "top_losers": "Top Losers",
     "ai_summary": "AI Market Summary",
     "live_signals": "Live Signals",
     "market_sentiment": "Market Sentiment",
     "active_cryptos": "Active Cryptos",
-    "active_cryptos_sub": "in circulation",
-    "market_cap_sub": "total capitalisation",
-    "volume_": "Volume",
-    "volume_sub": "last 24 hours"
+    "active_cryptos_sub": "in circulation"
   },
   "scanner": {
     "title": "AI Scanner",
-    "scan_all": "Scan All Pairs",
+    "scan_all": "Scan All",
     "scanning": "Scanning...",
     "timeframe": "Timeframe",
     "pair": "Pair",
@@ -87,31 +86,7 @@
     "closed_signals": "Closed Signals",
     "win_rate": "Win Rate",
     "avg_pnl": "Avg PnL",
-    "wins_losses": "Wins / Losses"
-  },
-  "common": {
-    "loading": "Loading...",
-    "error": "Error loading data",
-    "retry": "Retry",
-    "search": "Search",
-    "filter": "Filter",
-    "sort": "Sort",
-    "export": "Export",
-    "settings": "Settings",
-    "premium": "Premium",
-    "free": "Free",
-    "upgrade": "Upgrade to Premium",
-    "language": "Language",
-    "theme": "Theme",
-    "asset": "Asset",
-    "change_": "Change",
-    "login": "Login",
-    "logout": "Logout",
-    "market_cap_col": "Market Cap",
-    "price": "Price",
-    "rank": "Rank",
-    "register": "Register",
-    "search_pair": "Search pair..."
+    "wins_losses": "W / L"
   },
   "news": {
     "empty_hint": "Try again later",
@@ -120,9 +95,6 @@
     "filter_negative": "Negative",
     "filter_positive": "Positive",
     "loading": "Loading news..."
-  },
-  "style": {
-    "display": "Display"
   },
   "watchlist": {
     "add_first": "Add your first pair",
@@ -135,5 +107,34 @@
     "pairs": "Pairs",
     "pairs_saved": "pairs saved",
     "remove_tooltip": "Remove from list"
+  },
+  "style": {
+    "display": "Display"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Error loading data",
+    "retry": "Try again",
+    "search": "Search",
+    "filter": "Filter",
+    "sort": "Sort",
+    "export": "Export",
+    "settings": "Settings",
+    "premium": "Premium",
+    "free": "Free",
+    "upgrade": "Upgrade to Premium",
+    "language": "Language",
+    "theme": "Theme",
+    "asset": "Asset",
+    "change_": "Change",
+    "change_24h": "24h Change",
+    "change_7d": "7d Change",
+    "login": "Login",
+    "logout": "Logout",
+    "market_cap_col": "Market Cap",
+    "price": "Price",
+    "rank": "#",
+    "register": "Register",
+    "search_pair": "Search pair..."
   }
 }
