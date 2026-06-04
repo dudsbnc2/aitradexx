@@ -451,6 +451,7 @@ function BacktestPanel() {
 // ── History Panel ─────────────────────────────────────────────────────────────
 
 function HistoryPanel() {
+  const t = useT()
   const [history, setHistory] = useState<any[]>([])
   const [stats, setStats] = useState<any>(null)
   const [loading, setLoading] = useState(false)
@@ -603,6 +604,7 @@ function HistoryPanel() {
 // ── Auth Modal (original) ─────────────────────────────────────────────────────
 
 function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (user: any, token: string) => void }) {
+  const t = useT()
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [username, setUsername] = useState('')
@@ -715,6 +717,7 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (us
 // ── Add Pair Modal ────────────────────────────────────────────────────────────
 
 function AddPairModal({ watchlist, onAdd, onClose }: { watchlist: string[]; onAdd: (p: string) => void; onClose: () => void }) {
+  const t = useT()
   const [search, setSearch] = useState('')
   const filtered = ALL_PAIRS.filter(p => p.toLowerCase().includes(search.toLowerCase()) && !watchlist.includes(p))
 
