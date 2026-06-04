@@ -8,6 +8,7 @@ import {
   ToggleLeft, ToggleRight, ExternalLink, Info, BarChart2,
   Sparkles, Clock, Search, Radio, Square, AlertTriangle,
 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import ActivityFeed from './ActivityFeed'
 import AccountStatusBar from './AccountStatusBar'
 import { logSuccess, logError, logWarning, logInfo, logAction } from '@/lib/activity-log'
@@ -44,55 +45,6 @@ const SPOT_PAIRS = [
 const FUTURES_TIMEFRAMES = ['1m','3m','5m','15m','30m','1H','2H','4H','6H','12H','1D']
 const LEVERAGE_PRESETS   = [1,2,3,5,10,20,25,50,75,100,125]
 
-const RISK_PROFILES = [
-  { id: 'conservative' as RiskProfile, label: 'Conservador', desc: 'TP ×0.8 · SL ×0.5', color: '#00ff88' },
-  { id: 'balanced'     as RiskProfile, label: 'Balanceado',  desc: 'TP ×1.5 · SL ×1.0', color: '#00d4ff' },
-  { id: 'aggressive'   as RiskProfile, label: 'Agressivo',   desc: 'TP ×3.0 · SL ×1.5', color: '#ff9900' },
-]
-
-// ── Exchanges — MEXC removida, OKX e Hyperliquid adicionadas ─────────────────
-const EXCHANGES = [
-  {
-    id: 'bybit',
-    name: 'Bybit',
-    logo: '🟡',
-    url: 'https://www.bybit.com/app/user/api-management',
-    testnetSupported: true,
-    supportsSpot: true,
-    supportsfutures: true,
-    desc: 'Spot + Futuros · Testnet disponível',
-    hint: 'Cria a key com permissão Trade. Nunca actives Withdraw.',
-    secretLabel: 'API Secret',
-    secretPlaceholder: 'Cola a tua API Secret...',
-  },
-  {
-    id: 'okx',
-    name: 'OKX',
-    logo: '🔷',
-    url: 'https://www.okx.com/account/my-api',
-    testnetSupported: true,
-    supportsSpot: true,
-    supportsfutures: true,
-    desc: 'Spot + Futuros · Sem restrições de IP cloud',
-    hint: 'Secret no formato SECRET::PASSPHRASE (separa com ::). Permissão Trade.',
-    secretLabel: 'Secret::Passphrase',
-    secretPlaceholder: 'a1b2c3...::MinhaSenha',
-  },
-  {
-    id: 'hyperliquid',
-    name: 'Hyperliquid',
-    logo: '🟣',
-    url: 'https://app.hyperliquid.xyz/portfolio',
-    testnetSupported: false,
-    supportsSpot: false,
-    supportsfutures: true,
-    desc: 'Apenas Futuros · Sem KYC · Sem API key tradicional',
-    hint: 'API Key = endereço da tua wallet ETH (0x...). Secret = chave privada (0x...).',
-    secretLabel: 'Chave Privada (Private Key)',
-    secretPlaceholder: '0xabc123... (nunca partilhes)',
-  },
-]
-
 async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
   const headers: Record<string,string> = {
@@ -118,31 +70,41 @@ async function authFetch(url: string, options: RequestInit = {}): Promise<Respon
   return res
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, t }: { status: string; t: ReturnType<typeof useTranslations> }) {
   const map: Record<string,string> = {
     filled:    'text-[#00ff88] bg-[#00ff88]/10 border-[#00ff88]/30',
     pending:   'text-[#ffcc00] bg-[#ffcc00]/10 border-[#ffcc00]/30',
     failed:    'text-[#ff4466] bg-[#ff4466]/10 border-[#ff4466]/30',
     cancelled: 'text-[#8ba3be] bg-[#1a3a5c]/50 border-[#1a3a5c]',
   }
-  const labels: Record<string,string> = { filled:'EXECUTADA', pending:'PENDENTE', failed:'FALHOU', cancelled:'CANCELADA' }
+  const labels: Record<string,string> = {
+    filled:    t('autotrader.status_filled'),
+    pending:   t('autotrader.status_pending'),
+    failed:    t('autotrader.status_failed'),
+    cancelled: t('autotrader.status_cancelled'),
+  }
   return <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border ${map[status] || map.pending}`}>{labels[status] || status.toUpperCase()}</span>
 }
 
 function ExchangeBadge({ exchange }: { exchange: string }) {
-  const ex = EXCHANGES.find(e => e.id === exchange)
+  const EXCHANGES_MAP: Record<string, { logo: string; name: string }> = {
+    bybit:       { logo: '🟡', name: 'Bybit' },
+    okx:         { logo: '🔷', name: 'OKX' },
+    hyperliquid: { logo: '🟣', name: 'Hyperliquid' },
+  }
+  const ex = EXCHANGES_MAP[exchange]
   return <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono border border-[#1a3a5c] text-[#8ba3be]">{ex?.logo} {ex?.name || exchange.toUpperCase()}</span>
 }
 
-function BotResultCard({ status, result }: { status: BotStatus; result: AIRunResult|null }) {
+function BotResultCard({ status, result, t }: { status: BotStatus; result: AIRunResult|null; t: ReturnType<typeof useTranslations> }) {
   if (status === 'idle') return (
     <div className="flex flex-col items-center justify-center py-10 text-center space-y-3">
       <div className="w-14 h-14 rounded-full bg-[#00d4ff]/5 border border-[#00d4ff]/10 flex items-center justify-center">
         <Bot size={24} className="text-[#1a3a5c]" />
       </div>
-      <div className="text-sm font-bold text-[#3d5a73]">Bot em repouso</div>
+      <div className="text-sm font-bold text-[#3d5a73]">{t('autotrader.bot_idle_title')}</div>
       <div className="text-xs font-mono text-[#1a3a5c] max-w-xs">
-        Configura os parâmetros e carrega em <span className="text-[#00d4ff]">Executar Bot IA</span>
+        {t('autotrader.bot_idle_subtitle')} <span className="text-[#00d4ff]">{t('autotrader.bot_idle_btn')}</span>
       </div>
     </div>
   )
@@ -157,8 +119,8 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
         </div>
       </div>
       <div>
-        <div className="text-sm font-bold text-[#00d4ff]">A varrer o mercado...</div>
-        <div className="text-xs font-mono text-[#3d5a73] mt-1">A IA analisa todos os pares</div>
+        <div className="text-sm font-bold text-[#00d4ff]">{t('autotrader.bot_scanning')}</div>
+        <div className="text-xs font-mono text-[#3d5a73] mt-1">{t('autotrader.bot_scanning_sub')}</div>
       </div>
       <div className="flex gap-1.5">
         {[0,1,2,3,4].map(i => (
@@ -179,8 +141,8 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
         </div>
       </div>
       <div>
-        <div className="text-sm font-bold text-[#ff9900]">A enviar ordem...</div>
-        <div className="text-xs font-mono text-[#3d5a73] mt-1">Sinal encontrado · A abrir posição</div>
+        <div className="text-sm font-bold text-[#ff9900]">{t('autotrader.bot_executing')}</div>
+        <div className="text-xs font-mono text-[#3d5a73] mt-1">{t('autotrader.bot_executing_sub')}</div>
       </div>
     </div>
   )
@@ -194,9 +156,9 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
           <CheckCircle size={20} className="text-[#00ff88]" />
         </div>
         <div>
-          <div className="text-sm font-bold text-[#00ff88]">Posição aberta com sucesso</div>
+          <div className="text-sm font-bold text-[#00ff88]">{t('autotrader.bot_success_title')}</div>
           <div className="text-xs font-mono text-[#3d5a73] mt-0.5">
-            {new Date().toLocaleString('pt-PT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}
+            {new Date().toLocaleString(undefined, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}
           </div>
         </div>
         <div className={`ml-auto text-lg font-black ${result.bias==='LONG' ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>
@@ -205,14 +167,14 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
       </div>
       <div className="grid grid-cols-2 gap-2">
         {[
-          { label:'Par',           value: result.pair,                                    color:'#e8f4ff' },
-          { label:'Confiança IA',  value: `${result.confidence}%`,                        color:'#00d4ff' },
-          { label:'Preço entrada', value: `$${result.price?.toFixed(4)}`,                 color:'#e8f4ff' },
-          { label:'Alavancagem',   value: `${result.leverage ?? 1}×`,                     color:'#ff9900' },
-          { label:'Take Profit',   value: result.take_profit ? `$${result.take_profit.toFixed(4)}` : '—', color:'#00ff88' },
-          { label:'Stop Loss',     value: result.stop_loss   ? `$${result.stop_loss.toFixed(4)}`   : '—', color:'#ff4466' },
+          { label: t('signal.entry').replace('Entry','').trim() || 'Pair',   value: result.pair,                                    color:'#e8f4ff', key:'pair' },
+          { label: t('autotrader.bot_ai_confidence'),                        value: `${result.confidence}%`,                        color:'#00d4ff', key:'conf' },
+          { label: t('autotrader.bot_entry_price'),                          value: `$${result.price?.toFixed(4)}`,                 color:'#e8f4ff', key:'price' },
+          { label: t('autotrader.bot_leverage'),                             value: `${result.leverage ?? 1}×`,                     color:'#ff9900', key:'lev' },
+          { label: t('signal.take_profit'),                                  value: result.take_profit ? `$${result.take_profit.toFixed(4)}` : '—', color:'#00ff88', key:'tp' },
+          { label: t('signal.stop_loss'),                                    value: result.stop_loss   ? `$${result.stop_loss.toFixed(4)}`   : '—', color:'#ff4466', key:'sl' },
         ].map(item => (
-          <div key={item.label} className="p-2.5 rounded-lg bg-[#0c1f35] border border-[#1a3a5c]">
+          <div key={item.key} className="p-2.5 rounded-lg bg-[#0c1f35] border border-[#1a3a5c]">
             <div className="text-[10px] font-mono text-[#3d5a73] mb-0.5">{item.label}</div>
             <div className="text-xs font-bold font-mono" style={{ color: item.color }}>{item.value}</div>
           </div>
@@ -224,7 +186,7 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
       </div>
       {result.signal?.analysis && (
         <div className="p-3 rounded-lg bg-[#00d4ff]/5 border border-[#00d4ff]/15">
-          <div className="text-[10px] font-mono text-[#00d4ff] mb-1">Análise IA</div>
+          <div className="text-[10px] font-mono text-[#00d4ff] mb-1">{t('autotrader.bot_ai_analysis')}</div>
           <div className="text-[11px] font-mono text-[#8ba3be] leading-relaxed line-clamp-4">{result.signal.analysis}</div>
         </div>
       )}
@@ -238,12 +200,12 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
           <Clock size={18} className="text-[#ffcc00]" />
         </div>
         <div>
-          <div className="text-sm font-bold text-[#ffcc00]">Sem posição aberta</div>
+          <div className="text-sm font-bold text-[#ffcc00]">{t('autotrader.bot_no_signal_title')}</div>
           <div className="text-xs font-mono text-[#3d5a73] mt-0.5 leading-relaxed">{result.reason}</div>
         </div>
       </div>
       {result.scanned && (
-        <div className="text-[10px] font-mono text-[#3d5a73] text-center">{result.scanned} pares analisados</div>
+        <div className="text-[10px] font-mono text-[#3d5a73] text-center">{result.scanned} {t('autotrader.bot_pairs_analyzed')}</div>
       )}
     </motion.div>
   )
@@ -251,6 +213,7 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
 
 // ══════════════════════════════════════════════════════════════════════════════
 export default function AutoTraderTab({ user }: { user: any }) {
+  const t = useTranslations()
   const [section, setSection] = useState<'spot'|'futures'|'keys'|'history'>('spot')
 
   const [keys, setKeys]               = useState<ExchangeKey[]>([])
@@ -261,7 +224,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
   const [selEx, setSelEx]           = useState('bybit')
   const [apiKey, setApiKey]         = useState('')
   const [apiSec, setApiSec]         = useState('')
-  const [keyLabel, setKeyLabel]     = useState('Conta Principal')
+  const [keyLabel, setKeyLabel]     = useState('')
   const [testnet, setTestnet]       = useState(false)
   const [connecting, setConnecting] = useState(false)
 
@@ -289,11 +252,58 @@ export default function AutoTraderTab({ user }: { user: any }) {
 
   useEffect(() => () => { if (repeatTimer.current) clearTimeout(repeatTimer.current) }, [])
 
+  const EXCHANGES = [
+    {
+      id: 'bybit',
+      name: 'Bybit',
+      logo: '🟡',
+      url: 'https://www.bybit.com/app/user/api-management',
+      testnetSupported: true,
+      supportsSpot: true,
+      supportsfutures: true,
+      desc: t('autotrader.connect_bybit_desc'),
+      hint: t('autotrader.connect_bybit_hint'),
+      secretLabel: 'API Secret',
+      secretPlaceholder: '••••••••••••',
+    },
+    {
+      id: 'okx',
+      name: 'OKX',
+      logo: '🔷',
+      url: 'https://www.okx.com/account/my-api',
+      testnetSupported: true,
+      supportsSpot: true,
+      supportsfutures: true,
+      desc: t('autotrader.connect_okx_desc'),
+      hint: t('autotrader.connect_okx_hint'),
+      secretLabel: 'Secret::Passphrase',
+      secretPlaceholder: 'a1b2c3...::MyPassphrase',
+    },
+    {
+      id: 'hyperliquid',
+      name: 'Hyperliquid',
+      logo: '🟣',
+      url: 'https://app.hyperliquid.xyz/portfolio',
+      testnetSupported: false,
+      supportsSpot: false,
+      supportsfutures: true,
+      desc: t('autotrader.connect_hl_desc'),
+      hint: t('autotrader.connect_hl_hint'),
+      secretLabel: t('autotrader.connect_hl_note2').split('=')[0].trim(),
+      secretPlaceholder: '0xabc123...',
+    },
+  ]
+
+  const RISK_PROFILES = [
+    { id: 'conservative' as RiskProfile, label: t('autotrader.risk_conservative'), desc: 'TP ×0.8 · SL ×0.5', color: '#00ff88' },
+    { id: 'balanced'     as RiskProfile, label: t('autotrader.risk_balanced'),     desc: 'TP ×1.5 · SL ×1.0', color: '#00d4ff' },
+    { id: 'aggressive'   as RiskProfile, label: t('autotrader.risk_aggressive'),   desc: 'TP ×3.0 · SL ×1.5', color: '#ff9900' },
+  ]
+
   const selectedExchange = EXCHANGES.find(e => e.id === selEx)
   const selectedKeyObj   = keys.find(k => k.id === selectedKey)
   const selectedKeyEx    = EXCHANGES.find(e => e.id === selectedKeyObj?.exchange)
 
-  // Spot bloqueado para Hyperliquid
   const spotDisabledForExchange = selectedKeyObj?.exchange === 'hyperliquid'
 
   const loadKeys = useCallback(async () => {
@@ -316,11 +326,11 @@ export default function AutoTraderTab({ user }: { user: any }) {
         setBalance(d.coins)
         const usdt  = d.coins?.find((c: BalanceCoin) => c.coin === 'USDT' || c.coin === 'USDC')
         const total = d.coins?.reduce((s: number, c: BalanceCoin) => s + parseFloat(c.usd_value||'0'), 0) || 0
-        if (usdt) logInfo(`Saldo actualizado`, `${usdt.coin}: $${parseFloat(usdt.balance).toFixed(2)} · Total: $${total.toFixed(2)}`)
+        if (usdt) logInfo(t('autotrader.balance_updated_msg'), `${usdt.coin}: $${parseFloat(usdt.balance).toFixed(2)} · Total: $${total.toFixed(2)}`)
       }
     } catch {}
     finally { setBalLoading(false) }
-  }, [])
+  }, [t])
 
   const loadTrades = useCallback(async () => {
     try { const r = await authFetch(`${API}/api/autotrader/trades`); if (r.ok) setTrades(await r.json()) } catch {}
@@ -333,42 +343,42 @@ export default function AutoTraderTab({ user }: { user: any }) {
   useEffect(() => {
     if (selectedKey && keys.length) {
       const k = keys.find(k => k.id === selectedKey)
-      if (k) logSuccess(`Conta activa: ${k.label}`, `${EXCHANGES.find(e=>e.id===k.exchange)?.name}${k.testnet?' · TESTNET':''}`)
+      if (k) logSuccess(`${t('autotrader.account_active_msg')}: ${k.label}`, `${EXCHANGES.find(e=>e.id===k.exchange)?.name}${k.testnet?' · TESTNET':''}`)
     }
   }, [selectedKey])
 
   async function connectKey() {
-    if (!apiKey || !apiSec) return logError('Preenche a API Key e Secret')
+    if (!apiKey || !apiSec) return logError(t('autotrader.connect_error_fill'))
     setConnecting(true)
     try {
       const r = await authFetch(`${API}/api/autotrader/connect`, {
         method: 'POST',
-        body: JSON.stringify({ exchange: selEx, api_key: apiKey, api_secret: apiSec, label: keyLabel, testnet }),
+        body: JSON.stringify({ exchange: selEx, api_key: apiKey, api_secret: apiSec, label: keyLabel || t('autotrader.connect_label_placeholder'), testnet }),
       })
       const d = await r.json()
-      if (!r.ok) throw new Error(d.detail || 'Erro ao conectar')
-      logSuccess(`${EXCHANGES.find(e=>e.id===selEx)?.name} conectada!`, `Conta "${keyLabel}"`)
+      if (!r.ok) throw new Error(d.detail || t('autotrader.connect_error'))
+      logSuccess(`${EXCHANGES.find(e=>e.id===selEx)?.name} ${t('autotrader.account_connected_success')}`, `${t('autotrader.connect_success')} "${keyLabel || t('autotrader.connect_label_placeholder')}"`)
       setApiKey(''); setApiSec('')
       await loadKeys()
     } catch (e: any) {
-      logError('Falha ao conectar exchange', e.message)
+      logError(t('autotrader.connect_error'), e.message)
     } finally { setConnecting(false) }
   }
 
   async function deleteKey(id: number) {
     const k = keys.find(k => k.id === id)
     await authFetch(`${API}/api/autotrader/keys/${id}`, { method: 'DELETE' })
-    logWarning(`Conta removida: ${k?.label || id}`)
+    logWarning(`${t('autotrader.account_removed_msg')}: ${k?.label || id}`)
     setKeys(keys.filter(k => k.id !== id))
     if (selectedKey === id) { setSelectedKey(null); setBalance(null) }
   }
 
   async function executeSpot() {
-    if (!selectedKey) return logError('Seleciona uma conta primeiro', 'Vai ao separador Contas')
-    if (spotDisabledForExchange) return logError('Hyperliquid não suporta Spot', 'Usa o separador Futuros IA')
-    if (!spotConfirm) return logError('Confirma a ordem antes de executar')
+    if (!selectedKey) return logError(t('autotrader.spot_execute_error_no_account'), t('autotrader.spot_execute_error_go_accounts'))
+    if (spotDisabledForExchange) return logError(t('autotrader.spot_execute_error_hl'), t('autotrader.spot_execute_error_hl_hint'))
+    if (!spotConfirm) return logError(t('autotrader.spot_execute_error_confirm'))
     setSpotLoading(true); setSpotConfirm(false)
-    const dirLabel = spotSide === 'Buy' ? 'COMPRAR' : 'VENDER'
+    const dirLabel = spotSide === 'Buy' ? t('autotrader.spot_buy') : t('autotrader.spot_sell')
     logAction(`${dirLabel} ${spotPair}`, `$${spotSize} USDT`)
     try {
       const r = await authFetch(`${API}/api/autotrader/execute`, {
@@ -386,21 +396,21 @@ export default function AutoTraderTab({ user }: { user: any }) {
       const d = await r.json()
       if (!r.ok) throw new Error(d.detail || JSON.stringify(d))
       logSuccess(
-        `${dirLabel} ${spotPair} executado!`,
-        `Preço: $${d.price?.toFixed?.(4) ?? '—'} · Order ID: ${d.order_id}`
+        `${dirLabel} ${spotPair} ${t('autotrader.spot_executed_msg')}`,
+        `Price: $${d.price?.toFixed?.(4) ?? '—'} · Order ID: ${d.order_id}`
       )
       await loadTrades()
       if (selectedKey) await loadBalance(selectedKey, 'spot')
     } catch (e: any) {
-      logError(`Falha ao ${dirLabel} ${spotPair}`, e.message)
+      logError(`${t('autotrader.spot_fail_msg')} ${dirLabel} ${spotPair}`, e.message)
     } finally { setSpotLoading(false) }
   }
 
   async function runBot() {
-    if (!selectedKey) return logError('Seleciona uma conta primeiro', 'Vai ao separador Contas')
+    if (!selectedKey) return logError(t('autotrader.spot_execute_error_no_account'), t('autotrader.spot_execute_error_go_accounts'))
     if (botStatus === 'scanning' || botStatus === 'executing') return
     setBotResult(null); setBotStatus('scanning')
-    logAction('Bot IA iniciado', `Futuros · ${botTf} · Confiança mín: ${botMinConf}%`)
+    logAction(t('autotrader.bot_started_msg'), `Futures · ${botTf} · Min conf: ${botMinConf}%`)
     try {
       const r = await authFetch(`${API}/api/autotrader/ai-run`, {
         method: 'POST',
@@ -423,23 +433,23 @@ export default function AutoTraderTab({ user }: { user: any }) {
         setBotStatus('done'); setBotResult(d)
         setLastBotRun({ ts: new Date(), pair: d.pair, bias: d.bias, confidence: d.confidence, executed: true })
         logSuccess(
-          `Posição aberta: ${d.bias} ${d.pair}`,
-          `Confiança: ${d.confidence}% · Preço: $${d.price?.toFixed(4)} · TP: $${d.take_profit?.toFixed(4) ?? '—'} · SL: $${d.stop_loss?.toFixed(4) ?? '—'}`
+          `${t('autotrader.bot_position_opened')}: ${d.bias} ${d.pair}`,
+          `Confidence: ${d.confidence}% · Price: $${d.price?.toFixed(4)} · TP: $${d.take_profit?.toFixed(4) ?? '—'} · SL: $${d.stop_loss?.toFixed(4) ?? '—'}`
         )
         await loadTrades()
         if (selectedKey) await loadBalance(selectedKey, 'futures')
       } else {
         setBotStatus('done'); setBotResult(d)
         setLastBotRun({ ts: new Date(), pair: '', bias: '', confidence: 0, executed: false })
-        logWarning('Sem sinal adequado neste momento', d.reason || `Analisados ${d.scanned ?? '—'} pares`)
+        logWarning(t('autotrader.bot_no_signal_msg'), d.reason || `${d.scanned ?? '—'} ${t('autotrader.bot_pairs_analyzed')}`)
       }
     } catch (e: any) {
       setBotStatus('error')
       setBotResult({ executed: false, reason: e.message })
-      logError('Erro ao executar bot', e.message)
+      logError(t('autotrader.bot_error_msg'), e.message)
     }
     if (autoRepeatRef.current) {
-      logInfo('Repetição automática activa', 'Próxima análise em 5 minutos')
+      logInfo(t('autotrader.bot_auto_repeat_msg'), t('autotrader.bot_auto_repeat_next'))
       repeatTimer.current = setTimeout(() => { if (autoRepeatRef.current) runBot() }, 5 * 60 * 1000)
     }
   }
@@ -447,13 +457,13 @@ export default function AutoTraderTab({ user }: { user: any }) {
   function stopBot() {
     if (repeatTimer.current) clearTimeout(repeatTimer.current)
     setAutoRepeat(false); setBotStatus('idle')
-    logWarning('Bot parado pelo utilizador')
+    logWarning(t('autotrader.bot_stopped_msg'))
   }
 
   if (!user) return (
     <div className="glass-card p-12 text-center mt-4">
       <Bot size={48} className="text-[#1a3a5c] mx-auto mb-4" />
-      <div className="text-lg font-bold text-[#3d5a73] mb-2">Login necessário</div>
+      <div className="text-lg font-bold text-[#3d5a73] mb-2">{t('autotrader.login_required')}</div>
     </div>
   )
 
@@ -467,17 +477,17 @@ export default function AutoTraderTab({ user }: { user: any }) {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-lg font-bold flex items-center gap-2">
-            <Bot size={20} className="text-[#00d4ff]" /> Auto Trade
+            <Bot size={20} className="text-[#00d4ff]" /> {t('autotrader.title')}
             <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-[#ffcc00]/10 text-[#ffcc00] border border-[#ffcc00]/30">BETA</span>
           </h1>
-          <div className="text-xs font-mono text-[#3d5a73]">Bybit · OKX · Hyperliquid · Spot &amp; Futuros com IA</div>
+          <div className="text-xs font-mono text-[#3d5a73]">{t('autotrader.subtitle')}</div>
         </div>
         <div className="flex gap-2 flex-wrap">
           {([
-            { id:'spot',    label:'💰 Spot'       },
-            { id:'futures', label:'⚡ Futuros IA'  },
-            { id:'keys',    label:'🔑 Contas'      },
-            { id:'history', label:'📋 Histórico'   },
+            { id:'spot',    label: t('autotrader.tab_spot')     },
+            { id:'futures', label: t('autotrader.tab_futures')  },
+            { id:'keys',    label: t('autotrader.tab_accounts') },
+            { id:'history', label: t('autotrader.tab_history')  },
           ] as const).map(s => (
             <button key={s.id} onClick={() => setSection(s.id)}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all border ${section===s.id ? 'bg-[#00d4ff]/10 text-[#00d4ff] border-[#00d4ff]/20' : 'text-[#8ba3be] border-[#1a3a5c] hover:border-[#00d4ff]/20'}`}>
@@ -508,35 +518,35 @@ export default function AutoTraderTab({ user }: { user: any }) {
             <div className="flex items-center gap-2">
               <span className="text-xl">💰</span>
               <div>
-                <div className="text-sm font-bold">Spot — Comprar / Vender</div>
-                <div className="text-xs font-mono text-[#3d5a73]">Compra ou vende a moeda ao preço actual de mercado</div>
+                <div className="text-sm font-bold">{t('autotrader.spot_title')}</div>
+                <div className="text-xs font-mono text-[#3d5a73]">{t('autotrader.spot_subtitle')}</div>
               </div>
             </div>
 
             {!selectedKey && (
               <div className="p-3 rounded-xl bg-[#ff4466]/5 border border-[#ff4466]/20 text-xs font-mono text-[#ff4466] flex items-center gap-2">
                 <AlertTriangle size={13} />
-                Conecta uma conta no separador <button onClick={() => setSection('keys')} className="underline ml-1">Contas</button>
+                {t('autotrader.spot_no_account')} <button onClick={() => setSection('keys')} className="underline ml-1">{t('autotrader.tab_accounts')}</button>
               </div>
             )}
 
             {spotDisabledForExchange && (
               <div className="p-3 rounded-xl bg-[#ff9900]/5 border border-[#ff9900]/20 text-xs font-mono text-[#ff9900] flex items-center gap-2">
                 <AlertTriangle size={13} />
-                Hyperliquid suporta apenas Futuros. Usa o separador{' '}
-                <button onClick={() => setSection('futures')} className="underline ml-1">Futuros IA</button>.
+                {t('autotrader.spot_disabled_hl')}{' '}
+                <button onClick={() => setSection('futures')} className="underline ml-1">{t('autotrader.spot_disabled_hl_link')}</button>.
               </div>
             )}
 
             <div>
-              <label className="block text-xs font-mono text-[#3d5a73] mb-2">Moeda</label>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-2">{t('autotrader.spot_coin_label')}</label>
               <div className="relative mb-2">
                 <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3d5a73]" />
                 <input
                   type="text"
                   value={spotPairSearch}
                   onChange={e => setSpotPairSearch(e.target.value.toUpperCase())}
-                  placeholder="Pesquisar..."
+                  placeholder={t('autotrader.spot_search_placeholder')}
                   className="w-full bg-[#0c1f35] border border-[#1a3a5c] rounded-lg pl-8 pr-3 py-2 text-xs text-[#e8f4ff] font-mono focus:outline-none focus:border-[#00d4ff]/50 placeholder-[#3d5a73]"
                 />
               </div>
@@ -558,12 +568,12 @@ export default function AutoTraderTab({ user }: { user: any }) {
                 })}
               </div>
               <div className="mt-2 text-center text-xs font-mono text-[#3d5a73]">
-                Seleccionado: <span className="text-[#00d4ff] font-bold">{spotPair}</span>
+                {t('autotrader.spot_selected')}: <span className="text-[#00d4ff] font-bold">{spotPair}</span>
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Valor (USDT)</label>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">{t('autotrader.spot_value_label')}</label>
               <input
                 type="number" value={spotSize} min={1} step={1}
                 onChange={e => setSpotSize(parseFloat(e.target.value) || 0)}
@@ -582,7 +592,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
             </div>
 
             <div>
-              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Operação</label>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">{t('autotrader.spot_operation_label')}</label>
               <div className="grid grid-cols-2 gap-3">
                 <button onClick={() => setSpotSide('Buy')}
                   className={`py-3 rounded-xl text-sm font-bold font-mono border transition-all flex items-center justify-center gap-2 ${
@@ -590,7 +600,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
                       ? 'bg-[#00ff88]/15 text-[#00ff88] border-[#00ff88]/40'
                       : 'text-[#3d5a73] border-[#1a3a5c] hover:border-[#00ff88]/30'
                   }`}>
-                  <TrendingUp size={15} /> COMPRAR
+                  <TrendingUp size={15} /> {t('autotrader.spot_buy')}
                 </button>
                 <button onClick={() => setSpotSide('Sell')}
                   className={`py-3 rounded-xl text-sm font-bold font-mono border transition-all flex items-center justify-center gap-2 ${
@@ -598,28 +608,28 @@ export default function AutoTraderTab({ user }: { user: any }) {
                       ? 'bg-[#ff4466]/15 text-[#ff4466] border-[#ff4466]/40'
                       : 'text-[#3d5a73] border-[#1a3a5c] hover:border-[#ff4466]/30'
                   }`}>
-                  <TrendingDown size={15} /> VENDER
+                  <TrendingDown size={15} /> {t('autotrader.spot_sell')}
                 </button>
               </div>
             </div>
 
             <div className="p-3 rounded-xl bg-[#0c1f35] border border-[#1a3a5c] space-y-1.5 text-xs font-mono">
               <div className="flex justify-between">
-                <span className="text-[#3d5a73]">Moeda</span>
+                <span className="text-[#3d5a73]">{t('autotrader.spot_summary_coin')}</span>
                 <span className="font-bold text-[#e8f4ff]">{spotPair}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#3d5a73]">Operação</span>
+                <span className="text-[#3d5a73]">{t('autotrader.spot_summary_operation')}</span>
                 <span className={`font-bold ${spotSide === 'Buy' ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>
-                  {spotSide === 'Buy' ? '▲ COMPRAR' : '▼ VENDER'}
+                  {spotSide === 'Buy' ? `▲ ${t('autotrader.spot_buy')}` : `▼ ${t('autotrader.spot_sell')}`}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#3d5a73]">Valor</span>
+                <span className="text-[#3d5a73]">{t('autotrader.spot_summary_value')}</span>
                 <span className="font-bold">${spotSize} USDT</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#3d5a73]">Exchange</span>
+                <span className="text-[#3d5a73]">{t('autotrader.spot_summary_exchange')}</span>
                 <span className="text-[#8ba3be]">{selectedKeyEx?.name || '—'}</span>
               </div>
             </div>
@@ -629,7 +639,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
                 className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${spotConfirm ? 'bg-[#00ff88] border-[#00ff88]' : 'border-[#3d5a73]'}`}>
                 {spotConfirm && <span className="text-[#020b14] text-[10px] font-bold">✓</span>}
               </div>
-              <span className="text-xs font-mono text-[#8ba3be]">Confirmo que quero executar esta ordem com dinheiro real</span>
+              <span className="text-xs font-mono text-[#8ba3be]">{t('autotrader.spot_confirm_checkbox')}</span>
             </label>
 
             <button onClick={executeSpot} disabled={!selectedKey || !spotConfirm || spotLoading || spotDisabledForExchange}
@@ -639,15 +649,15 @@ export default function AutoTraderTab({ user }: { user: any }) {
                   : 'bg-[#ff4466]/15 text-[#ff4466] border-[#ff4466]/40 hover:bg-[#ff4466]/25'
               }`}>
               {spotLoading ? <RefreshCw size={15} className="animate-spin" /> : <Play size={15} />}
-              {spotSide === 'Buy' ? `COMPRAR ${spotPair}` : `VENDER ${spotPair}`}
+              {spotSide === 'Buy' ? `${t('autotrader.spot_buy')} ${spotPair}` : `${t('autotrader.spot_sell')} ${spotPair}`}
             </button>
 
             <div className="p-3 rounded-xl bg-[#00d4ff]/5 border border-[#00d4ff]/10 flex items-start gap-2">
               <Info size={13} className="text-[#00d4ff] flex-shrink-0 mt-0.5" />
               <div className="text-[10px] font-mono text-[#3d5a73] leading-relaxed">
-                Spot compra a moeda directamente (Bybit e OKX). Para LONG/SHORT com IA usa os{' '}
-                <button onClick={() => setSection('futures')} className="text-[#00d4ff] underline">Futuros</button>.
-                Hyperliquid suporta apenas Futuros.
+                {t('autotrader.spot_info')}{' '}
+                <button onClick={() => setSection('futures')} className="text-[#00d4ff] underline">{t('autotrader.spot_info_futures_link')}</button>.
+                {' '}{t('autotrader.spot_info_hl')}
               </div>
             </div>
           </div>
@@ -665,26 +675,26 @@ export default function AutoTraderTab({ user }: { user: any }) {
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-[#ff9900]" />
               <div>
-                <div className="text-sm font-bold">Bot IA — Futuros</div>
-                <div className="text-xs font-mono text-[#3d5a73]">A IA varre todos os pares, escolhe o melhor sinal e entra sozinha</div>
+                <div className="text-sm font-bold">{t('autotrader.futures_title')}</div>
+                <div className="text-xs font-mono text-[#3d5a73]">{t('autotrader.futures_subtitle')}</div>
               </div>
             </div>
 
             {!selectedKey && (
               <div className="p-3 rounded-xl bg-[#ff4466]/5 border border-[#ff4466]/20 text-xs font-mono text-[#ff4466] flex items-center gap-2">
                 <AlertTriangle size={13} />
-                Conecta uma conta no separador <button onClick={() => setSection('keys')} className="underline ml-1">Contas</button>
+                {t('autotrader.spot_no_account')} <button onClick={() => setSection('keys')} className="underline ml-1">{t('autotrader.tab_accounts')}</button>
               </div>
             )}
 
             {selectedKeyObj?.exchange === 'hyperliquid' && (
               <div className="p-2.5 rounded-lg bg-[#b366ff]/10 border border-[#b366ff]/20 text-[10px] font-mono text-[#b366ff] flex items-center gap-2">
-                🟣 Hyperliquid: futuros nativos sem KYC. Ordens assinadas com a tua wallet.
+                🟣 {t('autotrader.futures_hl_note')}
               </div>
             )}
 
             <div>
-              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Timeframe</label>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">{t('autotrader.futures_timeframe_label')}</label>
               <div className="grid grid-cols-6 gap-1.5">
                 {FUTURES_TIMEFRAMES.map(tf => (
                   <button key={tf} onClick={() => setBotTf(tf)}
@@ -700,7 +710,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
             </div>
 
             <div>
-              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Tamanho da ordem (USDT)</label>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">{t('autotrader.futures_order_size_label')}</label>
               <input type="number" value={botSize} min={1} step={1}
                 onChange={e => setBotSize(parseFloat(e.target.value) || 0)}
                 className="w-full bg-[#0c1f35] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm text-[#e8f4ff] font-mono focus:outline-none focus:border-[#ff9900]/50"
@@ -719,7 +729,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
 
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">
-                Alavancagem <span className="text-[#ff9900]">{botLev}×</span>
+                {t('autotrader.futures_leverage_label')} <span className="text-[#ff9900]">{botLev}×</span>
               </label>
               <div className="grid grid-cols-5 gap-1.5">
                 {LEVERAGE_PRESETS.map(lev => (
@@ -736,7 +746,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
             </div>
 
             <div>
-              <label className="block text-xs font-mono text-[#3d5a73] mb-2">Perfil de Risco (ajusta TP/SL)</label>
+              <label className="block text-xs font-mono text-[#3d5a73] mb-2">{t('autotrader.futures_risk_label')}</label>
               <div className="grid grid-cols-3 gap-2">
                 {RISK_PROFILES.map(rp => (
                   <button key={rp.id} onClick={() => setBotRisk(rp.id)}
@@ -751,20 +761,20 @@ export default function AutoTraderTab({ user }: { user: any }) {
 
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">
-                Confiança mínima: <span className="text-[#00d4ff]">{botMinConf}%</span>
+                {t('autotrader.futures_confidence_label')}: <span className="text-[#00d4ff]">{botMinConf}%</span>
               </label>
               <input type="range" min={50} max={99} step={1} value={botMinConf}
                 onChange={e => setBotMinConf(parseInt(e.target.value))}
                 className="w-full h-1.5 rounded-full appearance-none bg-[#1a3a5c] accent-[#00d4ff]" />
               <div className="flex justify-between text-[9px] font-mono text-[#3d5a73] mt-1">
-                <span>50% (mais ordens)</span><span>99% (muito selectivo)</span>
+                <span>50% ({t('autotrader.futures_confidence_more')})</span><span>99% ({t('autotrader.futures_confidence_less')})</span>
               </div>
             </div>
 
             <div className="flex items-center justify-between p-3 rounded-xl bg-[#0c1f35] border border-[#1a3a5c]">
               <div>
-                <div className="text-xs font-bold">Repetir automaticamente</div>
-                <div className="text-[10px] font-mono text-[#3d5a73]">Repete a cada 5 minutos até parares</div>
+                <div className="text-xs font-bold">{t('autotrader.futures_auto_repeat_title')}</div>
+                <div className="text-[10px] font-mono text-[#3d5a73]">{t('autotrader.futures_auto_repeat_subtitle')}</div>
               </div>
               <button onClick={() => setAutoRepeat(!autoRepeat)}>
                 {autoRepeat ? <ToggleRight size={24} className="text-[#00d4ff]" /> : <ToggleLeft size={24} className="text-[#3d5a73]" />}
@@ -775,13 +785,13 @@ export default function AutoTraderTab({ user }: { user: any }) {
               <button onClick={runBot} disabled={!selectedKey || botRunning}
                 className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-[#ff9900]/20 to-[#ff4466]/15 text-[#ff9900] border border-[#ff9900]/40 text-sm font-bold font-mono hover:from-[#ff9900]/30 hover:to-[#ff4466]/25 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
                 {botRunning
-                  ? <><RefreshCw size={16} className="animate-spin" />A analisar...</>
-                  : <><Sparkles size={16} />Executar Bot IA</>}
+                  ? <><RefreshCw size={16} className="animate-spin" />{t('autotrader.futures_analyzing')}</>
+                  : <><Sparkles size={16} />{t('autotrader.futures_run_bot')}</>}
               </button>
               {(botRunning || autoRepeat) && (
                 <button onClick={stopBot}
                   className="px-4 py-3.5 rounded-xl bg-[#ff4466]/10 text-[#ff4466] border border-[#ff4466]/30 font-bold font-mono hover:bg-[#ff4466]/20 transition-all flex items-center gap-2">
-                  <Square size={14} /> Parar
+                  <Square size={14} /> {t('autotrader.futures_stop')}
                 </button>
               )}
             </div>
@@ -789,7 +799,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
 
           <div className="space-y-4">
             <div className="glass-card p-5">
-              <BotResultCard status={botStatus} result={botResult} />
+              <BotResultCard status={botStatus} result={botResult} t={t} />
             </div>
             <ActivityFeed maxVisible={10} />
           </div>
@@ -800,9 +810,8 @@ export default function AutoTraderTab({ user }: { user: any }) {
       {section === 'keys' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className="glass-card p-5 space-y-4">
-            <div className="flex items-center gap-2"><Key size={16} className="text-[#00d4ff]"/><span className="text-sm font-bold">Conectar Exchange</span></div>
+            <div className="flex items-center gap-2"><Key size={16} className="text-[#00d4ff]"/><span className="text-sm font-bold">{t('autotrader.connect_title')}</span></div>
 
-            {/* Exchange selector */}
             <div className="grid grid-cols-3 gap-2">
               {EXCHANGES.map(ex => (
                 <button key={ex.id} onClick={() => { setSelEx(ex.id); setTestnet(false) }}
@@ -819,24 +828,23 @@ export default function AutoTraderTab({ user }: { user: any }) {
               <div className="text-xs text-[#ffcc00]/80 font-mono leading-relaxed">
                 {selectedExchange?.hint}{' '}
                 <a href={selectedExchange?.url} target="_blank" rel="noopener noreferrer" className="underline inline-flex items-center gap-0.5">
-                  Abrir painel API <ExternalLink size={10}/>
+                  {t('autotrader.connect_open_api')} <ExternalLink size={10}/>
                 </a>
               </div>
             </div>
 
-            {/* Hyperliquid info extra */}
             {selEx === 'hyperliquid' && (
               <div className="p-3 rounded-lg bg-[#b366ff]/5 border border-[#b366ff]/20 text-[10px] font-mono text-[#b366ff] leading-relaxed space-y-1">
-                <div>🟣 <strong>API Key</strong> = endereço público da tua wallet ETH (começa com 0x)</div>
-                <div>🔑 <strong>Chave Privada</strong> = private key da mesma wallet (0x + 64 hex chars)</div>
-                <div className="text-[#ff9900]">⚠️ Nunca partilhes a tua private key com ninguém.</div>
+                <div>🟣 <strong>API Key</strong> = {t('autotrader.connect_hl_note1')}</div>
+                <div>🔑 <strong>{t('autotrader.connect_hl_note2').split('=')[0].trim()}</strong> = {t('autotrader.connect_hl_note2').split('=').slice(1).join('=').trim()}</div>
+                <div className="text-[#ff9900]">{t('autotrader.connect_hl_warning')}</div>
               </div>
             )}
 
             {[
-              { label: selEx === 'hyperliquid' ? 'Endereço da Wallet (0x...)' : 'API Key', val:apiKey, set:setApiKey, ph: selEx === 'hyperliquid' ? '0x1234abcd...' : 'Cola a tua API key...', type:'text' },
+              { label: selEx === 'hyperliquid' ? t('autotrader.connect_wallet_label') : 'API Key', val:apiKey, set:setApiKey, ph: selEx === 'hyperliquid' ? '0x1234abcd...' : t('autotrader.connect_api_key_placeholder'), type:'text' },
               { label: selectedExchange?.secretLabel || 'API Secret', val:apiSec, set:setApiSec, ph: selectedExchange?.secretPlaceholder || '••••••••••••', type:'password' },
-              { label:'Etiqueta', val:keyLabel, set:setKeyLabel, ph:'Conta Principal', type:'text' },
+              { label: t('autotrader.connect_label_field'), val:keyLabel, set:setKeyLabel, ph: t('autotrader.connect_label_placeholder'), type:'text' },
             ].map(f => (
               <div key={f.label}>
                 <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">{f.label}</label>
@@ -847,10 +855,10 @@ export default function AutoTraderTab({ user }: { user: any }) {
 
             {selectedExchange?.testnetSupported && selEx !== 'hyperliquid' && (
               <div className="flex items-center justify-between">
-                <span className="text-xs font-mono text-[#3d5a73]">Testnet (simulação)</span>
+                <span className="text-xs font-mono text-[#3d5a73]">{t('autotrader.connect_testnet')}</span>
                 <button onClick={() => setTestnet(!testnet)} className="flex items-center gap-1.5">
                   {testnet ? <ToggleRight size={20} className="text-[#00d4ff]"/> : <ToggleLeft size={20} className="text-[#3d5a73]"/>}
-                  <span className={`text-xs font-mono ${testnet ? 'text-[#00d4ff]' : 'text-[#3d5a73]'}`}>{testnet ? 'LIGADO' : 'DESLIGADO'}</span>
+                  <span className={`text-xs font-mono ${testnet ? 'text-[#00d4ff]' : 'text-[#3d5a73]'}`}>{testnet ? t('autotrader.connect_on') : t('autotrader.connect_off')}</span>
                 </button>
               </div>
             )}
@@ -858,18 +866,18 @@ export default function AutoTraderTab({ user }: { user: any }) {
             <button onClick={connectKey} disabled={connecting || !apiKey || !apiSec}
               className="w-full py-2.5 rounded-xl bg-[#00d4ff]/15 text-[#00d4ff] border border-[#00d4ff]/30 text-sm font-bold font-mono hover:bg-[#00d4ff]/25 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
               {connecting ? <RefreshCw size={14} className="animate-spin"/> : <Key size={14}/>}
-              Conectar {selectedExchange?.logo} {selectedExchange?.name}
+              {t('autotrader.connect_btn')} {selectedExchange?.logo} {selectedExchange?.name}
             </button>
           </div>
 
           <div className="space-y-4">
             <div className="glass-card p-5">
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2"><Shield size={16} className="text-[#00ff88]"/><span className="text-sm font-bold">Contas Conectadas</span></div>
+                <div className="flex items-center gap-2"><Shield size={16} className="text-[#00ff88]"/><span className="text-sm font-bold">{t('autotrader.accounts_title')}</span></div>
                 <button onClick={loadKeys} className="w-7 h-7 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#00d4ff]"><RefreshCw size={12}/></button>
               </div>
               {keys.length === 0 ? (
-                <div className="text-center py-8"><Key size={32} className="text-[#1a3a5c] mx-auto mb-2"/><div className="text-xs font-mono text-[#3d5a73]">Nenhuma conta conectada</div></div>
+                <div className="text-center py-8"><Key size={32} className="text-[#1a3a5c] mx-auto mb-2"/><div className="text-xs font-mono text-[#3d5a73]">{t('autotrader.accounts_none')}</div></div>
               ) : (
                 <div className="space-y-2">
                   {keys.map(k => (
@@ -880,7 +888,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
                           <span className="text-sm font-bold">{k.label}</span>
                           <ExchangeBadge exchange={k.exchange}/>
                           {k.testnet && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#ffcc00]/10 text-[#ffcc00] border border-[#ffcc00]/30">TESTNET</span>}
-                          {selectedKey===k.id && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#00d4ff]/10 text-[#00d4ff] border border-[#00d4ff]/30">ATIVA</span>}
+                          {selectedKey===k.id && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#00d4ff]/10 text-[#00d4ff] border border-[#00d4ff]/30">{t('autotrader.accounts_active_badge')}</span>}
                         </div>
                         <div className="text-xs font-mono text-[#3d5a73] mt-0.5">{k.api_key_preview}</div>
                       </div>
@@ -897,7 +905,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
             {balance && balance.length > 0 && (
               <div className="glass-card p-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <Wallet size={14} className="text-[#00d4ff]"/><span className="text-sm font-bold">Saldo</span>
+                  <Wallet size={14} className="text-[#00d4ff]"/><span className="text-sm font-bold">{t('autotrader.balance_title')}</span>
                   <button onClick={() => selectedKey && loadBalance(selectedKey, 'spot')}
                     className="ml-auto w-6 h-6 rounded bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#00d4ff]">
                     <RefreshCw size={10} className={balLoading ? 'animate-spin' : ''}/>
@@ -926,50 +934,50 @@ export default function AutoTraderTab({ user }: { user: any }) {
         <div className="space-y-4">
           <div className="glass-card p-5">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-              <span className="text-sm font-bold">Histórico de Ordens</span>
+              <span className="text-sm font-bold">{t('autotrader.orders_title')}</span>
               <button onClick={loadTrades} className="w-7 h-7 rounded-lg bg-[#0c1f35] border border-[#1a3a5c] flex items-center justify-center text-[#8ba3be] hover:text-[#00d4ff]"><RefreshCw size={12}/></button>
             </div>
             {trades.length === 0 ? (
-              <div className="text-center py-12"><BarChart2 size={40} className="text-[#1a3a5c] mx-auto mb-3"/><div className="text-sm font-bold text-[#3d5a73]">Sem ordens ainda</div></div>
+              <div className="text-center py-12"><BarChart2 size={40} className="text-[#1a3a5c] mx-auto mb-3"/><div className="text-sm font-bold text-[#3d5a73]">{t('autotrader.orders_empty')}</div></div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs font-mono">
                   <thead>
                     <tr className="text-[#3d5a73] border-b border-[#1a3a5c]">
-                      <th className="text-left py-2 pr-3">Exchange</th>
-                      <th className="text-left py-2 pr-3">Par</th>
-                      <th className="text-left py-2 pr-3">Operação</th>
-                      <th className="text-left py-2 pr-3">Modo</th>
-                      <th className="text-right py-2 pr-3">Preço</th>
+                      <th className="text-left py-2 pr-3">{t('autotrader.orders_exchange')}</th>
+                      <th className="text-left py-2 pr-3">{t('autotrader.orders_pair')}</th>
+                      <th className="text-left py-2 pr-3">{t('autotrader.orders_operation')}</th>
+                      <th className="text-left py-2 pr-3">{t('autotrader.orders_mode')}</th>
+                      <th className="text-right py-2 pr-3">{t('autotrader.orders_price')}</th>
                       <th className="text-right py-2 pr-3">TP</th>
                       <th className="text-right py-2 pr-3">SL</th>
-                      <th className="text-center py-2 pr-3">Estado</th>
-                      <th className="text-right py-2">Data</th>
+                      <th className="text-center py-2 pr-3">{t('autotrader.orders_status')}</th>
+                      <th className="text-right py-2">{t('autotrader.orders_date')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {trades.map(t => (
-                      <tr key={t.id} className="border-b border-[#1a3a5c]/30 hover:bg-[#0c1f35]/50">
-                        <td className="py-2.5 pr-3"><ExchangeBadge exchange={t.exchange||'bybit'}/></td>
-                        <td className="py-2.5 pr-3 font-bold text-[#e8f4ff]">{t.pair}</td>
+                    {trades.map(tr => (
+                      <tr key={tr.id} className="border-b border-[#1a3a5c]/30 hover:bg-[#0c1f35]/50">
+                        <td className="py-2.5 pr-3"><ExchangeBadge exchange={tr.exchange||'bybit'}/></td>
+                        <td className="py-2.5 pr-3 font-bold text-[#e8f4ff]">{tr.pair}</td>
                         <td className="py-2.5 pr-3">
-                          <span className={`font-bold ${t.side==='Buy' ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>
-                            {t.side==='Buy'
-                              ? (t.trade_mode==='futures' ? '▲ LONG'   : '▲ COMPRA')
-                              : (t.trade_mode==='futures' ? '▼ SHORT'  : '▼ VENDA')}
+                          <span className={`font-bold ${tr.side==='Buy' ? 'text-[#00ff88]' : 'text-[#ff4466]'}`}>
+                            {tr.side==='Buy'
+                              ? (tr.trade_mode==='futures' ? t('autotrader.orders_long')  : t('autotrader.orders_buy'))
+                              : (tr.trade_mode==='futures' ? t('autotrader.orders_short') : t('autotrader.orders_sell'))}
                           </span>
                         </td>
                         <td className="py-2.5 pr-3">
-                          <span className={`text-[10px] font-bold ${t.trade_mode==='futures' ? 'text-[#ff9900]' : 'text-[#00ff88]'}`}>
-                            {t.trade_mode==='futures' ? '⚡ FUTUROS' : '💰 SPOT'}
+                          <span className={`text-[10px] font-bold ${tr.trade_mode==='futures' ? 'text-[#ff9900]' : 'text-[#00ff88]'}`}>
+                            {tr.trade_mode==='futures' ? t('autotrader.orders_futures') : t('autotrader.orders_spot')}
                           </span>
                         </td>
-                        <td className="py-2.5 pr-3 text-right text-[#e8f4ff]">${t.price?.toFixed(4)}</td>
-                        <td className="py-2.5 pr-3 text-right text-[#00ff88]">{t.take_profit>0 ? `$${t.take_profit.toFixed(4)}` : '—'}</td>
-                        <td className="py-2.5 pr-3 text-right text-[#ff4466]">{t.stop_loss>0   ? `$${t.stop_loss.toFixed(4)}`   : '—'}</td>
-                        <td className="py-2.5 pr-3 text-center"><StatusBadge status={t.status}/></td>
+                        <td className="py-2.5 pr-3 text-right text-[#e8f4ff]">${tr.price?.toFixed(4)}</td>
+                        <td className="py-2.5 pr-3 text-right text-[#00ff88]">{tr.take_profit>0 ? `$${tr.take_profit.toFixed(4)}` : '—'}</td>
+                        <td className="py-2.5 pr-3 text-right text-[#ff4466]">{tr.stop_loss>0   ? `$${tr.stop_loss.toFixed(4)}`   : '—'}</td>
+                        <td className="py-2.5 pr-3 text-center"><StatusBadge status={tr.status} t={t}/></td>
                         <td className="py-2.5 text-right text-[#3d5a73]">
-                          {t.created_at ? new Date(t.created_at).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}
+                          {tr.created_at ? new Date(tr.created_at).toLocaleString(undefined,{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}
                         </td>
                       </tr>
                     ))}
