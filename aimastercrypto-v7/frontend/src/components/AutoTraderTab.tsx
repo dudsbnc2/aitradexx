@@ -32,7 +32,6 @@ interface AIRunResult {
   order_id?: string; signal?: { analysis?: string }; scanned?: number
 }
 
-// ── Pares disponíveis para Spot (os mais líquidos e suportados) ────────────────
 const SPOT_PAIRS = [
   'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'BNB/USDT',
   'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 'DOT/USDT',
@@ -51,12 +50,49 @@ const RISK_PROFILES = [
   { id: 'aggressive'   as RiskProfile, label: 'Agressivo',   desc: 'TP ×3.0 · SL ×1.5', color: '#ff9900' },
 ]
 
+// ── Exchanges — MEXC removida, OKX e Hyperliquid adicionadas ─────────────────
 const EXCHANGES = [
-  { id: 'bybit', name: 'Bybit', logo: '🟡', url: 'https://www.bybit.com/app/user/api-management', testnetSupported: true  },
-  { id: 'mexc',  name: 'MEXC',  logo: '🔵', url: 'https://www.mexc.com/user/openapi',            testnetSupported: false },
+  {
+    id: 'bybit',
+    name: 'Bybit',
+    logo: '🟡',
+    url: 'https://www.bybit.com/app/user/api-management',
+    testnetSupported: true,
+    supportsSpot: true,
+    supportsfutures: true,
+    desc: 'Spot + Futuros · Testnet disponível',
+    hint: 'Cria a key com permissão Trade. Nunca actives Withdraw.',
+    secretLabel: 'API Secret',
+    secretPlaceholder: 'Cola a tua API Secret...',
+  },
+  {
+    id: 'okx',
+    name: 'OKX',
+    logo: '🔷',
+    url: 'https://www.okx.com/account/my-api',
+    testnetSupported: true,
+    supportsSpot: true,
+    supportsfutures: true,
+    desc: 'Spot + Futuros · Sem restrições de IP cloud',
+    hint: 'Secret no formato SECRET::PASSPHRASE (separa com ::). Permissão Trade.',
+    secretLabel: 'Secret::Passphrase',
+    secretPlaceholder: 'a1b2c3...::MinhaSenha',
+  },
+  {
+    id: 'hyperliquid',
+    name: 'Hyperliquid',
+    logo: '🟣',
+    url: 'https://app.hyperliquid.xyz/portfolio',
+    testnetSupported: false,
+    supportsSpot: false,
+    supportsfutures: true,
+    desc: 'Apenas Futuros · Sem KYC · Sem API key tradicional',
+    hint: 'API Key = endereço da tua wallet ETH (0x...). Secret = chave privada (0x...).',
+    secretLabel: 'Chave Privada (Private Key)',
+    secretPlaceholder: '0xabc123... (nunca partilhes)',
+  },
 ]
 
-// ── Auth fetch ────────────────────────────────────────────────────────────────
 async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
   const headers: Record<string,string> = {
@@ -82,7 +118,6 @@ async function authFetch(url: string, options: RequestInit = {}): Promise<Respon
   return res
 }
 
-// ── UI helpers ────────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string,string> = {
     filled:    'text-[#00ff88] bg-[#00ff88]/10 border-[#00ff88]/30',
@@ -99,7 +134,6 @@ function ExchangeBadge({ exchange }: { exchange: string }) {
   return <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono border border-[#1a3a5c] text-[#8ba3be]">{ex?.logo} {ex?.name || exchange.toUpperCase()}</span>
 }
 
-// ── Bot Result Card (só para futuros) ─────────────────────────────────────────
 function BotResultCard({ status, result }: { status: BotStatus; result: AIRunResult|null }) {
   if (status === 'idle') return (
     <div className="flex flex-col items-center justify-center py-10 text-center space-y-3">
@@ -124,7 +158,7 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
       </div>
       <div>
         <div className="text-sm font-bold text-[#00d4ff]">A varrer o mercado...</div>
-        <div className="text-xs font-mono text-[#3d5a73] mt-1">A IA analisa todos os pares de futuros</div>
+        <div className="text-xs font-mono text-[#3d5a73] mt-1">A IA analisa todos os pares</div>
       </div>
       <div className="flex gap-1.5">
         {[0,1,2,3,4].map(i => (
@@ -216,18 +250,14 @@ function BotResultCard({ status, result }: { status: BotStatus; result: AIRunRes
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MAIN COMPONENT
-// ══════════════════════════════════════════════════════════════════════════════
 export default function AutoTraderTab({ user }: { user: any }) {
   const [section, setSection] = useState<'spot'|'futures'|'keys'|'history'>('spot')
 
-  // Account
   const [keys, setKeys]               = useState<ExchangeKey[]>([])
   const [selectedKey, setSelectedKey] = useState<number|null>(null)
   const [balance, setBalance]         = useState<BalanceCoin[]|null>(null)
   const [balLoading, setBalLoading]   = useState(false)
 
-  // Connect form
   const [selEx, setSelEx]           = useState('bybit')
   const [apiKey, setApiKey]         = useState('')
   const [apiSec, setApiSec]         = useState('')
@@ -235,15 +265,13 @@ export default function AutoTraderTab({ user }: { user: any }) {
   const [testnet, setTestnet]       = useState(false)
   const [connecting, setConnecting] = useState(false)
 
-  // ── SPOT state ──────────────────────────────────────────────────────────────
-  const [spotPair,    setSpotPair]    = useState('BTC/USDT')
-  const [spotSize,    setSpotSize]    = useState(10)
-  const [spotSide,    setSpotSide]    = useState<'Buy'|'Sell'>('Buy')
-  const [spotConfirm, setSpotConfirm] = useState(false)
-  const [spotLoading, setSpotLoading] = useState(false)
+  const [spotPair,       setSpotPair]       = useState('BTC/USDT')
+  const [spotSize,       setSpotSize]       = useState(10)
+  const [spotSide,       setSpotSide]       = useState<'Buy'|'Sell'>('Buy')
+  const [spotConfirm,    setSpotConfirm]    = useState(false)
+  const [spotLoading,    setSpotLoading]    = useState(false)
   const [spotPairSearch, setSpotPairSearch] = useState('')
 
-  // ── FUTURES BOT state ───────────────────────────────────────────────────────
   const [botTf,      setBotTf]      = useState('1H')
   const [botSize,    setBotSize]    = useState(10)
   const [botLev,     setBotLev]     = useState(10)
@@ -257,10 +285,16 @@ export default function AutoTraderTab({ user }: { user: any }) {
   const repeatTimer   = useRef<ReturnType<typeof setTimeout>|null>(null)
   useEffect(() => { autoRepeatRef.current = autoRepeat }, [autoRepeat])
 
-  // History
   const [trades, setTrades] = useState<TradeLog[]>([])
 
   useEffect(() => () => { if (repeatTimer.current) clearTimeout(repeatTimer.current) }, [])
+
+  const selectedExchange = EXCHANGES.find(e => e.id === selEx)
+  const selectedKeyObj   = keys.find(k => k.id === selectedKey)
+  const selectedKeyEx    = EXCHANGES.find(e => e.id === selectedKeyObj?.exchange)
+
+  // Spot bloqueado para Hyperliquid
+  const spotDisabledForExchange = selectedKeyObj?.exchange === 'hyperliquid'
 
   const loadKeys = useCallback(async () => {
     try {
@@ -280,9 +314,9 @@ export default function AutoTraderTab({ user }: { user: any }) {
       if (r.ok) {
         const d = await r.json()
         setBalance(d.coins)
-        const usdt  = d.coins?.find((c: BalanceCoin) => c.coin === 'USDT')
+        const usdt  = d.coins?.find((c: BalanceCoin) => c.coin === 'USDT' || c.coin === 'USDC')
         const total = d.coins?.reduce((s: number, c: BalanceCoin) => s + parseFloat(c.usd_value||'0'), 0) || 0
-        if (usdt) logInfo(`Saldo actualizado`, `USDT: $${parseFloat(usdt.balance).toFixed(2)} · Total: $${total.toFixed(2)}`)
+        if (usdt) logInfo(`Saldo actualizado`, `${usdt.coin}: $${parseFloat(usdt.balance).toFixed(2)} · Total: $${total.toFixed(2)}`)
       }
     } catch {}
     finally { setBalLoading(false) }
@@ -303,7 +337,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
     }
   }, [selectedKey])
 
-  // ── Connect ──────────────────────────────────────────────────────────────────
   async function connectKey() {
     if (!apiKey || !apiSec) return logError('Preenche a API Key e Secret')
     setConnecting(true)
@@ -330,9 +363,9 @@ export default function AutoTraderTab({ user }: { user: any }) {
     if (selectedKey === id) { setSelectedKey(null); setBalance(null) }
   }
 
-  // ── SPOT execute ─────────────────────────────────────────────────────────────
   async function executeSpot() {
     if (!selectedKey) return logError('Seleciona uma conta primeiro', 'Vai ao separador Contas')
+    if (spotDisabledForExchange) return logError('Hyperliquid não suporta Spot', 'Usa o separador Futuros IA')
     if (!spotConfirm) return logError('Confirma a ordem antes de executar')
     setSpotLoading(true); setSpotConfirm(false)
     const dirLabel = spotSide === 'Buy' ? 'COMPRAR' : 'VENDER'
@@ -363,7 +396,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
     } finally { setSpotLoading(false) }
   }
 
-  // ── FUTURES BOT run ──────────────────────────────────────────────────────────
   async function runBot() {
     if (!selectedKey) return logError('Seleciona uma conta primeiro', 'Vai ao separador Contas')
     if (botStatus === 'scanning' || botStatus === 'executing') return
@@ -425,9 +457,8 @@ export default function AutoTraderTab({ user }: { user: any }) {
     </div>
   )
 
-  const selectedKeyObj = keys.find(k => k.id === selectedKey)
-  const botRunning     = botStatus === 'scanning' || botStatus === 'executing'
-  const filteredPairs  = SPOT_PAIRS.filter(p => p.toLowerCase().includes(spotPairSearch.toLowerCase()))
+  const botRunning    = botStatus === 'scanning' || botStatus === 'executing'
+  const filteredPairs = SPOT_PAIRS.filter(p => p.toLowerCase().includes(spotPairSearch.toLowerCase()))
 
   return (
     <div className="space-y-4 mt-1">
@@ -439,7 +470,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
             <Bot size={20} className="text-[#00d4ff]" /> Auto Trade
             <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-[#ffcc00]/10 text-[#ffcc00] border border-[#ffcc00]/30">BETA</span>
           </h1>
-          <div className="text-xs font-mono text-[#3d5a73]">Spot · Futuros com IA · Histórico</div>
+          <div className="text-xs font-mono text-[#3d5a73]">Bybit · OKX · Hyperliquid · Spot &amp; Futuros com IA</div>
         </div>
         <div className="flex gap-2 flex-wrap">
           {([
@@ -469,14 +500,11 @@ export default function AutoTraderTab({ user }: { user: any }) {
         lastBotRun={lastBotRun}
       />
 
-      {/* ════════════════════════════════════════════════════════════════════════
-          SPOT — Comprar e Vender moedas
-      ════════════════════════════════════════════════════════════════════════ */}
+      {/* ════ SPOT ════════════════════════════════════════════════════════════ */}
       {section === 'spot' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className="glass-card p-5 space-y-5">
 
-            {/* Cabeçalho */}
             <div className="flex items-center gap-2">
               <span className="text-xl">💰</span>
               <div>
@@ -492,10 +520,16 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             )}
 
-            {/* Escolher par — botões clicáveis */}
+            {spotDisabledForExchange && (
+              <div className="p-3 rounded-xl bg-[#ff9900]/5 border border-[#ff9900]/20 text-xs font-mono text-[#ff9900] flex items-center gap-2">
+                <AlertTriangle size={13} />
+                Hyperliquid suporta apenas Futuros. Usa o separador{' '}
+                <button onClick={() => setSection('futures')} className="underline ml-1">Futuros IA</button>.
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-2">Moeda</label>
-              {/* Pesquisa rápida */}
               <div className="relative mb-2">
                 <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#3d5a73]" />
                 <input
@@ -506,7 +540,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
                   className="w-full bg-[#0c1f35] border border-[#1a3a5c] rounded-lg pl-8 pr-3 py-2 text-xs text-[#e8f4ff] font-mono focus:outline-none focus:border-[#00d4ff]/50 placeholder-[#3d5a73]"
                 />
               </div>
-              {/* Grid de pares */}
               <div className="grid grid-cols-4 gap-1.5 max-h-44 overflow-y-auto pr-1">
                 {filteredPairs.map(pair => {
                   const base = pair.split('/')[0]
@@ -524,13 +557,11 @@ export default function AutoTraderTab({ user }: { user: any }) {
                   )
                 })}
               </div>
-              {/* Par seleccionado */}
               <div className="mt-2 text-center text-xs font-mono text-[#3d5a73]">
                 Seleccionado: <span className="text-[#00d4ff] font-bold">{spotPair}</span>
               </div>
             </div>
 
-            {/* Valor */}
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Valor (USDT)</label>
               <input
@@ -538,7 +569,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
                 onChange={e => setSpotSize(parseFloat(e.target.value) || 0)}
                 className="w-full bg-[#0c1f35] border border-[#1a3a5c] rounded-lg px-3 py-2.5 text-sm text-[#e8f4ff] font-mono focus:outline-none focus:border-[#00d4ff]/50"
               />
-              {/* Atalhos rápidos */}
               <div className="flex gap-1.5 mt-2">
                 {[10, 25, 50, 100, 250].map(v => (
                   <button key={v} onClick={() => setSpotSize(v)}
@@ -551,7 +581,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             </div>
 
-            {/* Comprar / Vender */}
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Operação</label>
               <div className="grid grid-cols-2 gap-3">
@@ -574,7 +603,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             </div>
 
-            {/* Resumo + Confirmação */}
             <div className="p-3 rounded-xl bg-[#0c1f35] border border-[#1a3a5c] space-y-1.5 text-xs font-mono">
               <div className="flex justify-between">
                 <span className="text-[#3d5a73]">Moeda</span>
@@ -591,8 +619,8 @@ export default function AutoTraderTab({ user }: { user: any }) {
                 <span className="font-bold">${spotSize} USDT</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#3d5a73]">Tipo</span>
-                <span className="text-[#8ba3be]">Mercado (imediato)</span>
+                <span className="text-[#3d5a73]">Exchange</span>
+                <span className="text-[#8ba3be]">{selectedKeyEx?.name || '—'}</span>
               </div>
             </div>
 
@@ -604,7 +632,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
               <span className="text-xs font-mono text-[#8ba3be]">Confirmo que quero executar esta ordem com dinheiro real</span>
             </label>
 
-            <button onClick={executeSpot} disabled={!selectedKey || !spotConfirm || spotLoading}
+            <button onClick={executeSpot} disabled={!selectedKey || !spotConfirm || spotLoading || spotDisabledForExchange}
               className={`w-full py-3.5 rounded-xl text-sm font-bold font-mono border transition-all flex items-center justify-center gap-2 disabled:opacity-40 ${
                 spotSide === 'Buy'
                   ? 'bg-[#00ff88]/15 text-[#00ff88] border-[#00ff88]/40 hover:bg-[#00ff88]/25'
@@ -614,30 +642,25 @@ export default function AutoTraderTab({ user }: { user: any }) {
               {spotSide === 'Buy' ? `COMPRAR ${spotPair}` : `VENDER ${spotPair}`}
             </button>
 
-            {/* Nota informativa */}
             <div className="p-3 rounded-xl bg-[#00d4ff]/5 border border-[#00d4ff]/10 flex items-start gap-2">
               <Info size={13} className="text-[#00d4ff] flex-shrink-0 mt-0.5" />
               <div className="text-[10px] font-mono text-[#3d5a73] leading-relaxed">
-                Spot compra a moeda directamente. Podes vender aqui ou na tua exchange quando quiseres.
-                Para análise automática com IA e LONG/SHORT, usa os <button onClick={() => setSection('futures')} className="text-[#00d4ff] underline">Futuros</button>.
+                Spot compra a moeda directamente (Bybit e OKX). Para LONG/SHORT com IA usa os{' '}
+                <button onClick={() => setSection('futures')} className="text-[#00d4ff] underline">Futuros</button>.
+                Hyperliquid suporta apenas Futuros.
               </div>
             </div>
           </div>
 
-          {/* Activity feed */}
           <div className="space-y-4">
             <ActivityFeed maxVisible={14} />
           </div>
         </div>
       )}
 
-      {/* ════════════════════════════════════════════════════════════════════════
-          FUTUROS — Bot IA com scan automático
-      ════════════════════════════════════════════════════════════════════════ */}
+      {/* ════ FUTUROS IA ══════════════════════════════════════════════════════ */}
       {section === 'futures' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-
-          {/* Config */}
           <div className="glass-card p-5 space-y-4">
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-[#ff9900]" />
@@ -654,7 +677,12 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             )}
 
-            {/* Timeframe */}
+            {selectedKeyObj?.exchange === 'hyperliquid' && (
+              <div className="p-2.5 rounded-lg bg-[#b366ff]/10 border border-[#b366ff]/20 text-[10px] font-mono text-[#b366ff] flex items-center gap-2">
+                🟣 Hyperliquid: futuros nativos sem KYC. Ordens assinadas com a tua wallet.
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Timeframe</label>
               <div className="grid grid-cols-6 gap-1.5">
@@ -671,7 +699,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             </div>
 
-            {/* Tamanho da ordem */}
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">Tamanho da ordem (USDT)</label>
               <input type="number" value={botSize} min={1} step={1}
@@ -690,7 +717,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             </div>
 
-            {/* Alavancagem */}
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">
                 Alavancagem <span className="text-[#ff9900]">{botLev}×</span>
@@ -709,7 +735,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             </div>
 
-            {/* Perfil de risco */}
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-2">Perfil de Risco (ajusta TP/SL)</label>
               <div className="grid grid-cols-3 gap-2">
@@ -724,7 +749,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             </div>
 
-            {/* Confiança mínima */}
             <div>
               <label className="block text-xs font-mono text-[#3d5a73] mb-1.5">
                 Confiança mínima: <span className="text-[#00d4ff]">{botMinConf}%</span>
@@ -737,7 +761,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             </div>
 
-            {/* Auto-repetir */}
             <div className="flex items-center justify-between p-3 rounded-xl bg-[#0c1f35] border border-[#1a3a5c]">
               <div>
                 <div className="text-xs font-bold">Repetir automaticamente</div>
@@ -748,7 +771,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </button>
             </div>
 
-            {/* Botão */}
             <div className="flex gap-3">
               <button onClick={runBot} disabled={!selectedKey || botRunning}
                 className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-[#ff9900]/20 to-[#ff4466]/15 text-[#ff9900] border border-[#ff9900]/40 text-sm font-bold font-mono hover:from-[#ff9900]/30 hover:to-[#ff4466]/25 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
@@ -765,7 +787,6 @@ export default function AutoTraderTab({ user }: { user: any }) {
             </div>
           </div>
 
-          {/* Resultado + Activity */}
           <div className="space-y-4">
             <div className="glass-card p-5">
               <BotResultCard status={botStatus} result={botResult} />
@@ -775,21 +796,20 @@ export default function AutoTraderTab({ user }: { user: any }) {
         </div>
       )}
 
-      {/* ════════════════════════════════════════════════════════════════════════
-          CONTAS
-      ════════════════════════════════════════════════════════════════════════ */}
+      {/* ════ CONTAS ══════════════════════════════════════════════════════════ */}
       {section === 'keys' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className="glass-card p-5 space-y-4">
             <div className="flex items-center gap-2"><Key size={16} className="text-[#00d4ff]"/><span className="text-sm font-bold">Conectar Exchange</span></div>
 
-            <div className="grid grid-cols-2 gap-2">
+            {/* Exchange selector */}
+            <div className="grid grid-cols-3 gap-2">
               {EXCHANGES.map(ex => (
-                <button key={ex.id} onClick={() => setSelEx(ex.id)}
+                <button key={ex.id} onClick={() => { setSelEx(ex.id); setTestnet(false) }}
                   className={`p-3 rounded-xl border text-left transition-all ${selEx===ex.id ? 'border-[#00d4ff]/40 bg-[#00d4ff]/5' : 'border-[#1a3a5c]'}`}>
                   <div className="text-base">{ex.logo}</div>
                   <div className={`text-sm font-bold mt-0.5 ${selEx===ex.id ? 'text-[#00d4ff]' : 'text-[#e8f4ff]'}`}>{ex.name}</div>
-                  <div className="text-[10px] font-mono text-[#3d5a73]">{ex.testnetSupported ? 'Testnet ✓' : 'Apenas Mainnet'}</div>
+                  <div className="text-[9px] font-mono text-[#3d5a73] mt-0.5 leading-tight">{ex.desc}</div>
                 </button>
               ))}
             </div>
@@ -797,16 +817,25 @@ export default function AutoTraderTab({ user }: { user: any }) {
             <div className="flex items-start gap-2 p-3 rounded-lg bg-[#ffcc00]/5 border border-[#ffcc00]/20">
               <Info size={13} className="text-[#ffcc00] flex-shrink-0 mt-0.5"/>
               <div className="text-xs text-[#ffcc00]/80 font-mono leading-relaxed">
-                Cria a key com permissão <strong>Trade</strong>. Nunca actives Withdraw.{' '}
-                <a href={EXCHANGES.find(e=>e.id===selEx)?.url} target="_blank" rel="noopener noreferrer" className="underline inline-flex items-center gap-0.5">
-                  Definições API <ExternalLink size={10}/>
+                {selectedExchange?.hint}{' '}
+                <a href={selectedExchange?.url} target="_blank" rel="noopener noreferrer" className="underline inline-flex items-center gap-0.5">
+                  Abrir painel API <ExternalLink size={10}/>
                 </a>
               </div>
             </div>
 
+            {/* Hyperliquid info extra */}
+            {selEx === 'hyperliquid' && (
+              <div className="p-3 rounded-lg bg-[#b366ff]/5 border border-[#b366ff]/20 text-[10px] font-mono text-[#b366ff] leading-relaxed space-y-1">
+                <div>🟣 <strong>API Key</strong> = endereço público da tua wallet ETH (começa com 0x)</div>
+                <div>🔑 <strong>Chave Privada</strong> = private key da mesma wallet (0x + 64 hex chars)</div>
+                <div className="text-[#ff9900]">⚠️ Nunca partilhes a tua private key com ninguém.</div>
+              </div>
+            )}
+
             {[
-              { label:'API Key', val:apiKey, set:setApiKey, ph:'Cola a tua API key...', type:'text' },
-              { label:'API Secret', val:apiSec, set:setApiSec, ph:'••••••••••••', type:'password' },
+              { label: selEx === 'hyperliquid' ? 'Endereço da Wallet (0x...)' : 'API Key', val:apiKey, set:setApiKey, ph: selEx === 'hyperliquid' ? '0x1234abcd...' : 'Cola a tua API key...', type:'text' },
+              { label: selectedExchange?.secretLabel || 'API Secret', val:apiSec, set:setApiSec, ph: selectedExchange?.secretPlaceholder || '••••••••••••', type:'password' },
               { label:'Etiqueta', val:keyLabel, set:setKeyLabel, ph:'Conta Principal', type:'text' },
             ].map(f => (
               <div key={f.label}>
@@ -816,7 +845,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
               </div>
             ))}
 
-            {EXCHANGES.find(e=>e.id===selEx)?.testnetSupported && (
+            {selectedExchange?.testnetSupported && selEx !== 'hyperliquid' && (
               <div className="flex items-center justify-between">
                 <span className="text-xs font-mono text-[#3d5a73]">Testnet (simulação)</span>
                 <button onClick={() => setTestnet(!testnet)} className="flex items-center gap-1.5">
@@ -829,7 +858,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
             <button onClick={connectKey} disabled={connecting || !apiKey || !apiSec}
               className="w-full py-2.5 rounded-xl bg-[#00d4ff]/15 text-[#00d4ff] border border-[#00d4ff]/30 text-sm font-bold font-mono hover:bg-[#00d4ff]/25 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
               {connecting ? <RefreshCw size={14} className="animate-spin"/> : <Key size={14}/>}
-              Conectar {EXCHANGES.find(e=>e.id===selEx)?.logo} {EXCHANGES.find(e=>e.id===selEx)?.name}
+              Conectar {selectedExchange?.logo} {selectedExchange?.name}
             </button>
           </div>
 
@@ -892,9 +921,7 @@ export default function AutoTraderTab({ user }: { user: any }) {
         </div>
       )}
 
-      {/* ════════════════════════════════════════════════════════════════════════
-          HISTÓRICO
-      ════════════════════════════════════════════════════════════════════════ */}
+      {/* ════ HISTÓRICO ═══════════════════════════════════════════════════════ */}
       {section === 'history' && (
         <div className="space-y-4">
           <div className="glass-card p-5">
