@@ -21,7 +21,12 @@
     "top_losers": "Maiores Quedas",
     "ai_summary": "Resumo IA do Mercado",
     "live_signals": "Sinais ao Vivo",
-    "market_sentiment": "Sentimento do Mercado"
+    "market_sentiment": "Sentimento do Mercado",
+    "active_cryptos": "Criptos Ativas",
+    "active_cryptos_sub": "em circulação",
+    "market_cap_sub": "capitalização total",
+    "volume_": "Volume",
+    "volume_sub": "últimas 24 horas"
   },
   "scanner": {
     "title": "Scanner IA",
@@ -32,7 +37,16 @@
     "analyze": "Analisar",
     "actionable": "Acionáveis",
     "scanned": "Escaneados",
-    "best_signal": "Melhor Sinal"
+    "best_signal": "Melhor Sinal",
+    "active_signals": "sinais ativos",
+    "after_scan": "após escaneamento",
+    "analyzing": "A analisar...",
+    "click_scan": "Clica em Escanear para começar",
+    "pairs_available": "pares disponíveis",
+    "pairs_monitoring": "pares monitorados",
+    "scanning_pairs": "A escanear pares...",
+    "select_pair_hint": "Seleciona um par para analisar",
+    "wait_pairs": "A carregar pares..."
   },
   "signal": {
     "long": "COMPRA",
@@ -67,6 +81,14 @@
     "wins": "Ganhos",
     "losses": "Perdas"
   },
+  "history": {
+    "title": "Histórico de Sinais",
+    "subtitle": "Sinais fechados e resultados",
+    "closed_signals": "Sinais Fechados",
+    "win_rate": "Taxa de Acerto",
+    "avg_pnl": "PnL Médio",
+    "wins_losses": "Ganhos / Perdas"
+  },
   "common": {
     "loading": "Carregando...",
     "error": "Erro ao carregar dados",
@@ -80,6 +102,38 @@
     "free": "Gratuito",
     "upgrade": "Assine o Premium",
     "language": "Idioma",
-    "theme": "Tema"
+    "theme": "Tema",
+    "asset": "Ativo",
+    "change_": "Variação",
+    "login": "Entrar",
+    "logout": "Sair",
+    "market_cap_col": "Cap. Mercado",
+    "price": "Preço",
+    "rank": "Rank",
+    "register": "Registar",
+    "search_pair": "Pesquisar par..."
+  },
+  "news": {
+    "empty_hint": "Tenta novamente mais tarde",
+    "empty_title": "Sem notícias disponíveis",
+    "filter_all": "Todas",
+    "filter_negative": "Negativas",
+    "filter_positive": "Positivas",
+    "loading": "A carregar notícias..."
+  },
+  "style": {
+    "display": "Visualização"
+  },
+  "watchlist": {
+    "add_first": "Adiciona o teu primeiro par",
+    "add_pair": "Adicionar Par",
+    "analyze": "Analisar",
+    "empty_hint": "Clica em + para adicionar pares",
+    "empty_title": "Lista vazia",
+    "market_cap": "Cap.",
+    "pair": "Par",
+    "pairs": "Pares",
+    "pairs_saved": "pares guardados",
+    "remove_tooltip": "Remover da lista"
   }
 }
